@@ -1,0 +1,7 @@
+{
+  "name": "python-to-fortran-playground",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node tests/ui.mjs && node tests/smoke.mjs" },
+  "devDependencies": { "pyodide": "0.27.7" }
+}
