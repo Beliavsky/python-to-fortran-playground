@@ -23,9 +23,11 @@ jobs:
       - run: npm ci
       - run: python xeditor.py
       - run: npm test
+      - run: python -m unittest discover -s tests -p test_site_build.py
+      - run: python xsite.py
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: _site
   deploy:
     needs: build
     runs-on: ubuntu-latest

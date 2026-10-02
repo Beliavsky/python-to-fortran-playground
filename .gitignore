@@ -1,5 +1,6 @@
 site/vendor/
 site/editor-vendor/
+_site/
 node_modules/
 __pycache__/
 *.pyc

@@ -93,6 +93,14 @@ The website has not been publicly deployed.
 
 Editor features
 ---------------
+Pages deployments run xsite.py to create _site with content-versioned URLs
+for scripts, styles, editor dependencies, the worker, and its Python adapter.
+This prevents a newly loaded page from using an older cached UI script (which
+can leave new buttons inactive and line counters stuck at zero). Source files
+in site are not modified. To preview the deployment artifact locally, run
+python xsite.py, then python -m http.server 8766 --bind 127.0.0.1 --directory _site.
+Check the build with python -m unittest discover -s tests -p test_site_build.py.
+
 CodeMirror 5.65.20 is pinned in package-lock.json. xeditor.py bundles its
 Python and Fortran modes, stylesheet, and MIT notice; no extra editor CDN is
 needed. The workflow builds these assets after npm ci. After pulling these
