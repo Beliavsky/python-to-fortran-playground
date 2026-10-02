@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; connect-src 'self' https://cdn.jsdelivr.net; worker-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'">
-  <title>Python → Fortran playground</title>
+  <title>p2f — Python → Fortran playground</title>
+  <link rel="stylesheet" href="editor-vendor/codemirror.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,7 +13,7 @@
     <header>
       <p class="eyebrow">TRANSLATE · INSPECT · EXPERIMENT</p>
       <h1>Python <span>→</span> Fortran</h1>
-      <p>A browser playground for xp2f. Explore the generated source, one example at a time.</p>
+      <p>A browser playground for p2f. Explore the generated source, one example at a time.</p>
       <p class="version">Published transpiler: <a id="version" target="_blank" rel="noopener">loading…</a></p>
       <p class="version" id="initialization" role="status">Initialization: waiting</p>
     </header>
@@ -24,12 +25,13 @@
         <option value="numpy">NumPy array</option>
       </select>
       <button id="load" type="button">Load example</button>
+      <button id="clear" type="button">Clear</button>
       <button id="translate" class="primary" type="button" disabled>Translate</button>
       <button id="cancel" type="button" disabled>Cancel</button>
     </div>
     <section class="editors" aria-label="Source editors">
-      <div class="panel"><label for="python">Python input</label><textarea id="python" spellcheck="false" aria-describedby="limits"></textarea></div>
-      <div class="panel"><label for="fortran">Generated Fortran</label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>
+      <div class="panel"><label for="python">Python input <span class="line-count" id="python-lines">0 lines</span></label><textarea id="python" spellcheck="false" aria-describedby="limits"></textarea></div>
+      <div class="panel"><label for="fortran">Generated Fortran <span class="line-count" id="fortran-lines">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>
     </section>
     <div class="toolbar">
       <button id="download" type="button" disabled>Download Fortran</button>
@@ -38,6 +40,7 @@
     </div>
     <section class="diagnostics"><h2>Diagnostics</h2><pre id="diagnostics">No translation yet.</pre></section>
     <footer>
+      <p id="editor-note">Loading syntax coloring…</p>
       <p id="limits">Prototype · single-file input · 100 KB limit · 180-second request limit · flat output</p>
       <p>Translation only: submitted programs are not run or compiled. Translation happens in your browser; the playground does not send your source to a server. The Python runtime is downloaded from jsDelivr.</p>
       <p>Generated code may require runtime helpers and has not been compiler-checked. Unsupported Python produces diagnostics. Initial loading can take a little while.</p>

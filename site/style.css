@@ -18,10 +18,15 @@ button:disabled { opacity: .5; cursor: default; }
 .editors { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .panel { background: white; border: 1px solid #c4d1cc; border-radius: 8px; overflow: hidden; }
 .panel label { display: block; padding: 12px 16px; background: #e6eeea; font-weight: 650; font-size: 14px; }
-textarea { display: block; width: 100%; height: 450px; padding: 18px; border: 0; resize: vertical; white-space: pre; overflow: auto; font: 14px/1.65 Consolas, monospace; color: #193742; background: white; tab-size: 4; }
+.line-count { float: right; font-weight: 400; color: #4b6267; }
+.CodeMirror { height: 450px; font: 14px/1.65 Consolas, monospace; color: #193742; }
+.CodeMirror-scroll { min-height: 150px; }
+.CodeMirror-gutters { background: #f5f8f6; border-right: 1px solid #e0e7e3; }
+.CodeMirror-focused { outline: 2px solid #d89628; outline-offset: -2px; }
+.panel > textarea { display: block; width: 100%; height: 450px; padding: 18px; border: 0; resize: vertical; white-space: pre; overflow: auto; font: 14px/1.65 Consolas, monospace; color: #193742; background: white; tab-size: 4; }
 #status { margin-left: auto; font-size: 14px; }
 .diagnostics { border: 1px solid #c4d1cc; padding: 14px 18px; background: white; border-radius: 8px; }
 h2 { font-size: 14px; margin: 0 0 8px; }
-pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 Consolas, monospace; }
+.diagnostics pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 Consolas, monospace; }
 footer { margin-top: 20px; line-height: 1.6; }
-@media (max-width: 760px) { main { padding: 20px 14px; } .editors { grid-template-columns: 1fr; } textarea { height: 300px; } #status { margin-left: 0; width: 100%; } }
+@media (max-width: 760px) { main { padding: 20px 14px; } .editors { grid-template-columns: 1fr; } .panel > textarea, .CodeMirror { height: 300px; } #status { margin-left: 0; width: 100%; } }

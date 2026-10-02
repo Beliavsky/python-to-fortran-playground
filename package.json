@@ -2,6 +2,11 @@
   "name": "python-to-fortran-playground",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/ui.mjs && node tests/smoke.mjs" },
-  "devDependencies": { "pyodide": "0.27.7" }
+  "scripts": {
+    "test": "node tests/editors.mjs && node tests/ui.mjs && node tests/smoke.mjs"
+  },
+  "devDependencies": {
+    "codemirror": "5.65.20",
+    "pyodide": "0.27.7"
+  }
 }

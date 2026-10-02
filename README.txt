@@ -7,6 +7,8 @@ program execution, user accounts, or server-side translation endpoint.
 Start on Windows:
   cd C:\python\python-to-fortran-playground
   python xvendor.py
+  npm ci
+  python xeditor.py
   python xserve.py
 Then open http://127.0.0.1:8765/ in a modern browser. Internet access is needed
 to load Pyodide from jsDelivr. Do not open index.html as a file:// URL.
@@ -88,6 +90,24 @@ retains the interpreter and restores upstream state between translations;
 the cold-start cost is paid once per worker instead of on every submission.
 No connected browser was available for visual or click-through verification.
 The website has not been publicly deployed.
+
+Editor features
+---------------
+CodeMirror 5.65.20 is pinned in package-lock.json. xeditor.py bundles its
+Python and Fortran modes, stylesheet, and MIT notice; no extra editor CDN is
+needed. The workflow builds these assets after npm ci. After pulling these
+changes locally, run npm ci and python xeditor.py, then refresh the page.
+Editor loading is independent of translator initialization. If it fails,
+plain textareas remain usable and Clear asks before discarding nonempty input.
+
+The Python editor supports four-space Tab indentation, line numbers, and
+Ctrl+Z (Cmd+Z on macOS). Clear is one undoable edit in the enhanced editor;
+it also clears the translation and diagnostics and focuses Python input.
+It does not restart the worker and is disabled during a translation.
+The Fortran editor remains read-only, with text selection and copying allowed.
+Esc blurs the editor so keyboard users can move to the next control.
+Both headings count physical lines including comments and blank lines; one
+terminal newline does not add an extra line, and empty text has zero lines.
 
 Persistent-worker validation, 2026-10-02
 --------------------------------------

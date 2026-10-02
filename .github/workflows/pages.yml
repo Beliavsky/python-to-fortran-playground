@@ -21,6 +21,7 @@ jobs:
           node-version: '22'
       - run: python xvendor.py
       - run: npm ci
+      - run: python xeditor.py
       - run: npm test
       - uses: actions/upload-pages-artifact@v4
         with:
