@@ -10,6 +10,26 @@ const examples = {
 let token = '', commit = '', revision = 0, active = null, debounce = null, pending = false;
 let downloading = false, connecting = false;
 let serviceURL = '';
+let optionCatalog = {};
+function selectedOptions() {
+  return { preset: get('compiler-preset').value || 'default',
+    warnings: Boolean(get('compiler-warnings').checked), fast_math: Boolean(get('compiler-fast-math').checked) };
+}
+function optionControls() {
+  const spec = optionCatalog[get('compiler').value];
+  const locked = !token || Boolean(active) || !spec;
+  for (const preset of ['default', 'debug', 'optimized', 'strict']) get(`preset-${preset}`).disabled = !spec?.presets[preset];
+  if (!spec?.presets[get('compiler-preset').value]) get('compiler-preset').value = 'default';
+  get('compiler-preset').disabled = locked;
+  for (const [id, key] of [['compiler-warnings', 'warnings'], ['compiler-fast-math', 'fast_math']]) {
+    if (!spec?.extras[key]) get(id).checked = false;
+    get(id).disabled = locked || !spec?.extras[key];
+  }
+  const selection = selectedOptions();
+  const flags = spec ? [...spec.presets[selection.preset],
+    ...(selection.warnings ? spec.extras.warnings : []), ...(selection.fast_math ? spec.extras.fast_math : [])] : [];
+  get('compiler-options-note').textContent = `${spec?.note || 'Option controls require an updated execution service.'} User-code flags: ${flags.join(' ') || '(compiler default)'}. Helpers keep fixed build options; checks do not instrument helpers.${selection.fast_math ? ' Fast math can change numerical results, including comparisons.' : ''}`;
+}
 let lastTranslation = '', settingOutput = false;
 const editing = () => Boolean(get('edit-fortran').checked);
 const modified = () => output.getValue() !== lastTranslation;
@@ -44,6 +64,7 @@ function buttons() {
   get('live').disabled = editing();
   get('fortran-title').textContent = modified() ? 'Edited Fortran' : 'Generated Fortran';
   get('run-fortran').textContent = editing() ? 'Compile and Run Fortran' : 'Run Fortran';
+  optionControls();
 }
 async function api(path, method = 'GET', payload) {
   const response = await fetch(`${serviceURL}/api/${path}`, {
@@ -83,6 +104,7 @@ async function connect() {
     const manifest = await response.json();
     if (manifest.commit !== session.commit) throw new Error('Service and page use different transpiler revisions.');
     token = session.token; commit = session.commit;
+    optionCatalog = session.compiler_options || {};
     const compilers = session.compilers || ['gfortran'];
     get('compiler-intel').disabled = !compilers.includes('ifx');
     get('compiler-intel').textContent = compilers.includes('ifx') ? 'Intel Fortran (experimental)' : 'Intel Fortran (unavailable)';
@@ -154,7 +176,8 @@ async function submit(mode, automatic = false) {
   get('status').textContent = mode === 'translate' ? 'Translating…' : 'Running…';
   try {
     const created = await api('jobs', 'POST', { source, mode, automatic, compiler: get('compiler').value || 'gfortran',
-      ...(editJob ? { fortran_source: fortranSource } : {}) });
+      ...(editJob ? { fortran_source: fortranSource } : {}),
+      ...(optionCatalog[get('compiler').value] ? { compiler_options: selectedOptions() } : {}) });
     job.id = created.id;
     if (job.stopping) await api(`jobs/${job.id}/cancel`, 'POST', {});
     while (active === job) {
@@ -205,7 +228,12 @@ get('reset-fortran').onclick = () => {
 };
 get('compiler').onchange = () => {
   revision++;
+  optionControls();
   get('freshness').textContent = 'Compiler changed; previous results are retained.';
+};
+for (const id of ['compiler-preset', 'compiler-warnings', 'compiler-fast-math']) get(id).onchange = () => {
+  revision++; optionControls();
+  get('freshness').textContent = 'Compiler options changed; previous results are retained.';
 };
 get('stop').onclick = async () => {
   if (!active) return;

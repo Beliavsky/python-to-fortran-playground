@@ -45,6 +45,13 @@
       <button id="download" type="button" disabled>Download Fortran</button>
       <span id="status" role="status" aria-live="polite">Connecting…</span>
     </div>
+    <div class="toolbar" aria-label="User-code compiler options">
+      <label for="compiler-preset">User-code options</label>
+      <select id="compiler-preset" disabled><option id="preset-default" value="default">Default</option><option id="preset-debug" value="debug">Debug</option><option id="preset-optimized" value="optimized">Optimized</option><option id="preset-strict" value="strict">Strict</option></select>
+      <label><input id="compiler-warnings" type="checkbox" disabled> Extra warnings</label>
+      <label><input id="compiler-fast-math" type="checkbox" disabled> Fast math (advanced; may change results)</label>
+    </div>
+    <p id="compiler-options-note" class="version">Helpers keep fixed build options.</p>
     <p id="freshness" class="version">No results yet.</p>
     <section class="editors" aria-label="Program output">
       <div class="diagnostics"><h2>Python output <span id="python-time" class="line-count"></span></h2><pre id="python-output">Not run.</pre></div>

@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from compiler_options import OPTIONS, user_flags
 
 ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
@@ -193,11 +194,13 @@ def compare_outputs(left, right, tolerance=1e-10):
 
 
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
-            compiler_name="gfortran", fortran_source=None):
+            compiler_name="gfortran", fortran_source=None, compiler_options=None):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
     command_text = compiler_command(compiler_name, compiler)
+    flags = user_flags(compiler_name, compiler_options)
+    result['compiler_options'] = compiler_options or {'preset': 'default'}
     if mode in COMPILE_MODES and not shutil.which(shlex.split(command_text)[0]):
         return {**result, "error": f"{compiler_name} is unavailable in this execution environment. "
                 "Choose GNU Fortran or ask the service owner to install the selected compiler."}
@@ -222,17 +225,26 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             result['fortran'] = fortran_source
             result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
             command = [sys.executable, str(ROOT / 'xcompile_fortran.py'), '--runtime', str(runtime),
-                       '--compiler', command_text]
+                       '--compiler', command_text, '--user-flags', json.dumps(flags)]
             result['build'] = run_command(command, ft, cancel, 180)
         elif mode != "python":
             command = [sys.executable, str(runtime / "xp2f.py"), "input.py", "--flat", "--out", "input_p.f90"]
             if mode != "translate":
                 result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
-                command += ["--compile", "--compiler", command_text]
+                if not flags:
+                    command += ["--compile", "--compiler", command_text]
             result["build"] = run_command(command, ft, cancel, 180)
             output = ft / "input_p.f90"
             if output.exists():
                 result["fortran"] = output.read_text(encoding="utf-8")
+            if mode in COMPILE_MODES and flags and result['build']['ok']:
+                translated = result['build']
+                result['build'] = run_command([sys.executable, str(ROOT / 'xcompile_fortran.py'),
+                    '--runtime', str(runtime), '--compiler', command_text,
+                    '--user-flags', json.dumps(flags)], ft, cancel, 180)
+                result['build']['stdout'] = translated['stdout'] + result['build']['stdout']
+                result['build']['stderr'] = translated['stderr'] + result['build']['stderr']
+                result['build']['seconds'] += translated['seconds']
         if mode in {"python", "both", "compare", 'both-edit', 'compare-edit'}:
             result["python"] = run_command([sys.executable, "input.py"], py, cancel, timeout)
         if mode in COMPILE_MODES and result["build"]["ok"]:
@@ -278,7 +290,8 @@ class ExecutionServer(ThreadingHTTPServer):
                 result = execute(self.runtime, payload["source"], payload["mode"], job.cancel,
                                  self.compiler, self.timeout, payload.get("automatic", False),
                                  compiler_name=payload.get("compiler", "gfortran"),
-                                 fortran_source=payload.get('fortran_source'))
+                                 fortran_source=payload.get('fortran_source'),
+                                 compiler_options=payload.get('compiler_options'))
             except Exception as error:
                 result = {"ok": False, "error": str(error)}
             with self.lock:
@@ -320,7 +333,7 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/session":
             self.reply(200, {"token": self.server.token, "commit": self.server.manifest["commit"],
                              "timeout": self.server.timeout, "compiler": self.server.compiler,
-                             "compilers": available_compilers(self.server.compiler)})
+                             "compilers": available_compilers(self.server.compiler), 'compiler_options': OPTIONS})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
                 return
@@ -366,6 +379,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.reply(400, {"error": "Enter valid source (up to 100 KB per language) and a valid operation."})
                 return
             payload['source'] = source
+            try:
+                user_flags(choice, payload.get('compiler_options'))
+            except ValueError as error:
+                self.reply(400, {'error': str(error)})
+                return
             identifier = self.server.submit(payload)
             self.reply(202 if identifier else 429, {"id": identifier} if identifier else {"error": "Two jobs are already active; stop one or wait."})
         elif self.path.startswith("/api/jobs/") and self.path.endswith("/cancel"):

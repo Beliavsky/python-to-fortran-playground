@@ -28,7 +28,8 @@ def main():
         result = execute(Path('/opt/p2f/runtime'), payload['source'], payload['mode'],
                          threading.Event(), timeout=30, automatic=payload.get('automatic', False),
                          compiler_name=payload.get('compiler', 'gfortran'),
-                         fortran_source=payload.get('fortran_source'))
+                         fortran_source=payload.get('fortran_source'),
+                         compiler_options=payload.get('compiler_options'))
     except Exception as error:
         result = {'ok': False, 'error': str(error)}
     # Do not echo submitted source to the control plane or its logs.

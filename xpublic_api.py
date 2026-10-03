@@ -14,6 +14,7 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from compiler_options import OPTIONS, user_flags
 
 MAX_REQUEST = 1_300_000
 MAX_SOURCE = 100_000
@@ -66,7 +67,7 @@ class PublicService:
             board['sessions'][key] = {'expires': self.clock() + 3600, 'address': address_key}
             await self.store.put('board', board)
             return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
-                    'compilers': list(self.compilers), 'hosted': True}
+                    'compilers': list(self.compilers), 'hosted': True, 'compiler_options': OPTIONS}
 
     async def reap(self, board):
         for identifier, job in board['jobs'].items():
@@ -197,8 +198,12 @@ def create_api(service):
         except (ValueError, UnicodeError):
             raise HTTPException(400, 'Enter valid source (up to 100 KB per language) and a valid operation.')
         payload['source'] = source
+        try:
+            user_flags(compiler, payload.get('compiler_options'))
+        except ValueError as error:
+            raise HTTPException(400, str(error))
         return await service.submit(token, {key: payload[key] for key in
-            ('source', 'mode', 'automatic', 'compiler', 'fortran_source') if key in payload
+            ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options') if key in payload
             and (key != 'fortran_source' or mode in EDIT_MODES)})
 
     @api.get('/api/jobs/{identifier}')

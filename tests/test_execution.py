@@ -202,6 +202,7 @@ class ExecutionTests(unittest.TestCase):
                 self.assertIn(b"Run Both", response.read())
             with request("/api/session") as response:
                 session = json.load(response)
+            self.assertIn('debug', session['compiler_options']['gfortran']['presets'])
             for headers in ({"Origin": "https://evil.invalid"}, {"Host": "evil.invalid"}):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     request("/api/session", headers=headers)
@@ -211,7 +212,9 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 403)
             headers = {"Content-Type": "application/json", "X-P2F-Token": session["token"]}
             for payload in ([], {"source": "print(1)", "mode": []}, {"source": "x" * 100001, "mode": "python"},
-                            {"source": "print(1)", "mode": "fortran", "compiler": "ifx -O3"}):
+                            {"source": "print(1)", "mode": "fortran", "compiler": "ifx -O3"},
+                            {"source": "print(1)", "mode": "fortran", "compiler_options": {'flags': '-O3'}},
+                            {"source": "print(1)", "mode": "fortran", "compiler_options": {'preset': []}}):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     request("/api/jobs", payload, headers)
                 self.assertEqual(error.exception.code, 400)

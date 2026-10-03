@@ -95,6 +95,23 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'ifx')
 
+    def test_options_advertised_validated_and_forwarded(self):
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
+        self.assertIn('debug', catalog['gfortran']['presets'])
+        self.assertNotIn('debug', catalog['lfortran']['presets'])
+        for selection in ('-O3', [], {'preset': ['debug']}, {'flags': '-O3'},
+                          {'preset': 'garbage'}, {'fast_math': 'yes'}):
+            response = self.client.post('/api/jobs', json={'source': 'print(1)',
+                'mode': 'compare', 'compiler_options': selection}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(self.runner.jobs)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        selection = {'preset': 'debug', 'warnings': True, 'fast_math': False}
+        response = self.client.post('/api/jobs', json={'source': 'print(1)',
+            'mode': 'compare', 'compiler_options': selection}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler_options'], selection)
+
     def test_edited_fortran_validation_and_forwarding(self):
         ft = 'program demo\nprint *, 42\nend program demo\n'
         invalid = [

@@ -7,8 +7,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 
-from xrun import compiler_command, helper_identity
+from xrun import compiler_command, helper_identity, execute
+from compiler_options import OPTIONS
 
 
 def precompile(runtime, name):
@@ -45,6 +47,29 @@ def main():
     parser.add_argument('--runtime', type=Path, default=Path('/opt/p2f/runtime'))
     options = parser.parse_args()
     precompile(options.runtime.resolve(), options.compiler)
+    verify_options(options.runtime.resolve(), options.compiler)
+
+
+def verify_options(runtime, compiler):
+    """Reject an optional image if advertised user flags fail with cached helpers."""
+    selections = [{'preset': preset} for preset in OPTIONS[compiler]['presets']]
+    selections += [{key: True} for key in OPTIONS[compiler]['extras']]
+    ft = '''program option_check
+use, intrinsic :: iso_fortran_env, only: real64
+use python_mod, only: mean
+implicit none
+real(real64) :: x(3) = [1.0_real64, 2.0_real64, 3.0_real64]
+print *, mean(x)
+end program option_check
+'''
+    for selection in selections:
+        result = execute(runtime, '', 'fortran-edit', threading.Event(), compiler_name=compiler,
+                         compiler_options=selection, fortran_source=ft)
+        if (not result['ok'] or not result.get('precompiled_helpers')
+                or 'Build helper:' in result['build']['stdout']
+                or float(result['execution']['stdout']) != 2.0):
+            raise RuntimeError(f'{compiler} option verification failed: {selection}: {result}')
+        print(f'{compiler} user options {selection}: PASS', flush=True)
 
 
 if __name__ == '__main__':

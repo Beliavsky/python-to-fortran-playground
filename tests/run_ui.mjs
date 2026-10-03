@@ -13,11 +13,15 @@ let state, created, cancellation = 0, jobNumber = 0;
 let stoppedBeforeCreated = false;
 let submissionStatus = 202;
 let compilers = ['gfortran'];
+const optionCatalog = {
+  gfortran: {presets: {default: [], debug: ['-O0', '-g'], optimized: ['-O3'], strict: ['-pedantic']}, extras: {warnings: ['-Wall'], fast_math: ['-ffast-math']}, note: 'GNU'},
+  lfortran: {presets: {default: []}, extras: {fast_math: ['--fast']}, note: 'Experimental'},
+};
 const sleep = setTimeout;
 globalThis.fetch = async (url, options = {}) => {
   let payload;
   if (url === './service.json') payload = { url: '' };
-  else if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', compilers, timeout: 30 };
+  else if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', compilers, timeout: 30, compiler_options: optionCatalog };
   else if (url === '../vendor/manifest.json') payload = { commit: '123abcdef' };
   else if (url === '/api/jobs') {
     created = JSON.parse(options.body); jobNumber++;
@@ -45,6 +49,12 @@ state = { state: 'done', result };
 await get('compare').onclick();
 assert.equal(created.mode, 'compare');
 assert.equal(created.compiler, 'gfortran');
+assert.deepEqual(created.compiler_options, {preset: 'default', warnings: false, fast_math: false});
+get('compiler-preset').value = 'debug'; get('compiler-preset').onchange();
+get('compiler-warnings').checked = true; get('compiler-warnings').onchange();
+await get('compare').onclick();
+assert.deepEqual(created.compiler_options, {preset: 'debug', warnings: true, fast_math: false});
+assert.match(get('compiler-options-note').textContent, /-O0 -g -Wall/);
 assert.match(get('status').textContent, /outputs match/);
 assert.equal(get('python-output').textContent, '385\n');
 assert.equal(get('fortran-output').textContent, '385\n');
@@ -75,9 +85,15 @@ await get('connect').onclick();
 assert.equal(get('compiler-lfortran').disabled, false);
 get('compiler').value = 'lfortran';
 get('compiler').onchange();
+assert.equal(get('compiler-preset').value, 'default');
+assert.equal(get('preset-debug').disabled, true);
+assert.equal(get('compiler-warnings').disabled, true);
+assert.equal(get('compiler-warnings').checked, false);
+get('compiler-fast-math').checked = true; get('compiler-fast-math').onchange();
 state = { state: 'done', result: { ...result, compiler: 'lfortran' } };
 await get('compare').onclick();
 assert.equal(created.compiler, 'lfortran');
+assert.equal(created.compiler_options.fast_math, true);
 assert.match(get('status').textContent, /lfortran/);
 compilers = ['gfortran'];
 await get('connect').onclick();
@@ -92,6 +108,7 @@ await new Promise(resolve => sleep(resolve, 10));
 assert.equal(get('run-python').disabled, true);
 assert.equal(get('stop').disabled, false);
 assert.equal(get('compiler').disabled, true);
+assert.equal(get('compiler-preset').disabled, true);
 get('python').value = 'print(2)'; get('python').listeners.input();
 assert.equal(get('download').disabled, true);
 state = { state: 'done', result: { ...result, fortran: 'wrong stale output' } };

@@ -387,6 +387,45 @@ The old service does not accept the new edit operations. Local previews use
 the updated xrun.py immediately after restarting it. Check direct compilation:
   python -m unittest discover -s tests -p test_fortran_edit.py
 
+User-code compiler options on /run/
+----------------------------------
+Choose Default, Debug, Optimized, or Strict when supported by the selected
+compiler. Optional Extra warnings and advanced Fast math controls are enabled
+only for compilers that offer them. The page shows the selected flags; build
+diagnostics show the actual command. Default preserves existing behavior.
+GNU Debug enables -fcheck=all and backtraces; Intel Debug enables -check all
+and traceback. Flang Debug enables -O0 -g only, not bounds-checking promises.
+Strict means GNU Fortran 2018 checking, Intel F2018 standards warnings, or
+Flang pedantic diagnostics, not identical behavior across compilers.
+LFortran currently offers Default and experimental --fast only.
+
+Options are validated against compiler_options.py on both local and hosted
+servers. There is no raw flags field, include/link path control, ABI-changing
+kind option, or CPU-specific selection. Fast math is off by default and can
+change numerical results. Intel Optimized explicitly uses -fp-model precise;
+selecting Fast math overrides that. Some floating-point runtime behavior is
+process-wide even though helper object code is not rebuilt.
+
+These settings compile user Fortran, not python.f90 or lapack_d.f90. Helpers
+retain their existing compiler-specific cache and fallback build settings;
+debugging and standards checks do not instrument/check helper source. For
+non-default options, xp2f translates without compiling, then the standalone
+compile driver links the helpers with user code. Default keeps the original
+single-call transpile/compile path. Translation-only operations ignore flags.
+Hosted image builds verify every advertised preset/extra using cached helpers;
+an optional compiler that fails verification remains unavailable.
+
+References for the deliberately small subset:
+  https://gcc.gnu.org/onlinedocs/gfortran/Debugging-Options.html
+  https://www.intel.com/content/www/us/en/developer/articles/guide/porting-guide-for-ifort-to-ifx.html
+  https://flang.llvm.org/docs/FlangCommandLineReference.html
+  https://docs.lfortran.org/en/usage/
+
+After committing/pushing these changes, redeploy the execution service:
+  .venv-execution\Scripts\python.exe xdeploy_service.py
+The new option controls stay disabled against an old service, which does not
+advertise the catalog. Local previews need xrun.py restarted.
+
 Persistent-worker validation, 2026-10-02
 --------------------------------------
 All 11 Pyodide checks and the mocked UI lifecycle checks passed. A measured

@@ -20,7 +20,7 @@ def runtime_image_name():
         return os.environ['P2F_RUNTIME_IMAGE_NAME']
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
-    for filename in ('xmodal.py', 'xrun.py', 'xcompile_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
+    for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'xcompile_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
                      'xverify_flang.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
@@ -41,6 +41,7 @@ job_image = (
     .apt_install('gfortran')
     .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
     .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'compiler_options.py', '/opt/p2f/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
     .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
     .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
@@ -89,6 +90,7 @@ lfortran_installed_image = (
     .micromamba_install('lfortran=0.66.0=hd7e4fe6_4', channels=['conda-forge'])
     .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
     .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'compiler_options.py', '/opt/p2f/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
     .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
     .add_local_file(ROOT / 'xverify_flang.py', '/opt/p2f/xverify_flang.py', copy=True)
@@ -114,6 +116,7 @@ api_image = (
           'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0',
           'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0'})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
+    .add_local_file(ROOT / 'compiler_options.py', '/root/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/manifest.json', copy=True)
 )
 
