@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 const elements = new Map();
 globalThis.document = { getElementById(id) {
   if (!elements.has(id)) elements.set(id, { value: '', textContent: '', disabled: false,
+    classList: { toggle() {} },
     listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, focus() {} });
   return elements.get(id);
 } };

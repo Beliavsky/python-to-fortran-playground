@@ -387,6 +387,28 @@ The old service does not accept the new edit operations. Local previews use
 the updated xrun.py immediately after restarting it. Check direct compilation:
   python -m unittest discover -s tests -p test_fortran_edit.py
 
+Fortran-only playground
+----------------------
+Open /run/?mode=fortran for the dedicated Fortran layout, or toggle Fortran
+only on /run/. Both entry points use the same page and execution service;
+there is no extra repository or backend to maintain. The heading, examples
+and full-width editor switch to Fortran, hiding Python input/output,
+translation controls, and Run Both/Compare. Compiler choices, options, Run,
+Stop, Download and compilation diagnostics remain available.
+
+Fortran is editable automatically. A new empty pane receives a standalone
+sum-of-squares example; nonempty code is never replaced on entry. Load example
+and Clear operate on Fortran only and ask before replacing or deleting code.
+Python code, output and timings survive switching, running Fortran and Clear.
+Fortran-only requests send empty Python source. Returning to the combined
+layout restores the previous Edit Fortran setting, retains Fortran changes,
+and leaves live translation paused. The layout toggle is locked during a job.
+Switching updates the mode query parameter without reloading the page.
+
+This is a UI-only update: push this repository for the Pages workflow to
+publish it. It uses the existing edit-mode API; no service redeployment is
+needed if that API is already deployed. Check with node tests/fortran_only.mjs.
+
 User-code compiler options on /run/
 ----------------------------------
 Choose Default, Debug, Optimized, or Strict when supported by the selected

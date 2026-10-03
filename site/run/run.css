@@ -1,3 +1,5 @@
 .build { margin-top: 18px; }
 .diagnostics pre { max-height: 360px; overflow: auto; }
 #connection { font-size: 14px; }
+[hidden] { display: none !important; }
+.fortran-only .editors { grid-template-columns: minmax(0, 1fr); }

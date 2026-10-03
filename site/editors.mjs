@@ -33,6 +33,7 @@ export function createEditor(textarea, counter, onChange = () => {}) {
       cm?.setOption('readOnly', value);
     },
     focus() { if (cm) cm.focus(); else textarea.focus(); },
+    refresh() { cm?.refresh(); },
     get undoableClear() { return cm !== null; },
     enhance(CodeMirror, mode, label) {
       cm = CodeMirror.fromTextArea(textarea, {

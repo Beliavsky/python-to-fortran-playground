@@ -10,28 +10,31 @@
   <link rel="stylesheet" href="run.css">
 </head>
 <body>
-  <main>
+  <main id="run-layout">
     <header>
-      <p class="eyebrow">TRANSLATE · RUN · COMPARE</p>
-      <h1>Python <span>→</span> Fortran</h1>
-      <p>Run a single-file program in Python and its Fortran translation.</p>
-      <p><a href="../">Open the translation-only playground</a></p>
+      <p id="eyebrow" class="eyebrow">TRANSLATE · RUN · COMPARE</p>
+      <h1 id="page-heading">Python <span>→</span> Fortran</h1>
+      <p id="page-intro">Run a single-file program in Python and its Fortran translation.</p>
+      <p><a href="../">Open the translation-only playground</a> · <a href="?mode=fortran">Open the Fortran playground</a></p>
       <p id="connection" role="status">Connecting to the execution service…</p>
-      <p class="version">Programs run only when you click a Run or Compare button. Live mode only translates.</p>
+      <p id="execution-note" class="version">Programs run only when you click a Run or Compare button. Live mode only translates.</p>
     </header>
     <div class="toolbar">
-      <label for="example">Example</label>
+      <label class="live-toggle"><input id="fortran-only" type="checkbox"> Fortran only</label>
+      <label id="python-example-label" for="example">Example</label>
       <select id="example"><option value="sum">Sum of squares</option><option value="function">A numerical function</option><option value="numpy">NumPy array</option></select>
+      <label id="fortran-example-label" for="fortran-example" hidden>Fortran example</label>
+      <select id="fortran-example" hidden><option value="sum">Sum of squares</option><option value="helper">python_mod mean</option></select>
       <button id="load" type="button">Load example</button>
       <button id="clear" type="button">Clear</button>
       <button id="connect" type="button">Reconnect</button>
       <button id="translate" type="button" disabled>Translate</button>
-      <label class="live-toggle"><input id="live" type="checkbox"> Live translation</label>
-      <label class="live-toggle"><input id="edit-fortran" type="checkbox"> Edit Fortran</label>
+      <label id="live-label" class="live-toggle"><input id="live" type="checkbox"> Live translation</label>
+      <label id="edit-fortran-label" class="live-toggle"><input id="edit-fortran" type="checkbox"> Edit Fortran</label>
       <button id="reset-fortran" type="button" disabled>Restore last translation</button>
     </div>
     <section class="editors" aria-label="Source editors">
-      <div class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
+      <div id="python-panel" class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
       <div class="panel"><label for="fortran"><span id="fortran-title">Generated Fortran</span> <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here, or enable Edit Fortran to enter a standalone program."></textarea></div>
     </section>
     <div class="toolbar">
@@ -54,15 +57,15 @@
     <p id="compiler-options-note" class="version">Helpers keep fixed build options.</p>
     <p id="freshness" class="version">No results yet.</p>
     <section class="editors" aria-label="Program output">
-      <div class="diagnostics"><h2>Python output <span id="python-time" class="line-count"></span></h2><pre id="python-output">Not run.</pre></div>
+      <div id="python-output-panel" class="diagnostics"><h2>Python output <span id="python-time" class="line-count"></span></h2><pre id="python-output">Not run.</pre></div>
       <div class="diagnostics"><h2>Fortran output <span id="fortran-time" class="line-count"></span></h2><pre id="fortran-output">Not run.</pre></div>
     </section>
-    <section class="diagnostics build"><h2>Translation and compilation <span id="build-time" class="line-count"></span></h2><pre id="diagnostics">No translation yet.</pre></section>
+    <section class="diagnostics build"><h2><span id="build-heading">Translation and compilation</span> <span id="build-time" class="line-count"></span></h2><pre id="diagnostics">No translation yet.</pre></section>
     <footer>
       <p id="editor-note">Loading syntax coloring…</p>
-      <p>Edit Fortran pauses live translation. Run Fortran compiles the pane directly; Run Both and Compare use that edited source. A standalone Fortran program can also run with empty Python input. Existing python_mod helpers are available automatically; additional libraries are not provided.</p>
+      <p id="mode-help">Edit Fortran pauses live translation. Run Fortran compiles the pane directly; Run Both and Compare use that edited source. A standalone Fortran program can also run with empty Python input. Existing python_mod helpers are available automatically; additional libraries are not provided.</p>
       <p>100 KB per source language · 200 KB per output stream · no interactive input · each run starts afresh.</p>
-      <p>Comparison ignores whitespace and allows numerical differences within 1e-10 absolute or relative tolerance. Random draws can differ between Python and Fortran.</p>
+      <p id="comparison-note">Comparison ignores whitespace and allows numerical differences within 1e-10 absolute or relative tolerance. Random draws can differ between Python and Fortran.</p>
       <p>GNU is the default. Intel is optional; availability depends on the service. Compiler failures are reported without silently switching engines.</p>
       <p>Execution sends the source to the connected service. Hosted jobs run in isolated environments with no network access and fresh files for every operation. Local execution uses the permissions of the account running xrun.py.</p>
     </footer>

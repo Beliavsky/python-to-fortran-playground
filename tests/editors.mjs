@@ -9,8 +9,11 @@ for (const [text, expected] of [['', 0], ['x', 1], ['x\n', 1], ['x\n\n', 2],
 const textarea = { value: 'old input\n', readOnly: false, addEventListener() {}, focus() {} };
 const counter = {};
 const editor = createEditor(textarea, counter);
+editor.refresh(); // Plain text fallback does not need an editor instance.
+let refreshes = 0;
 let value = textarea.value, previous, changed, options;
 const cm = {
+  refresh() { refreshes++; },
   getValue: () => value,
   getDoc: () => ({ changeGeneration() {} }),
   posFromIndex: index => ({ line: 1, ch: index - 10 }),
@@ -33,6 +36,8 @@ assert.equal(editor.getValue(), 'old input\n');
 assert.equal(counter.textContent, '1 line');
 editor.setReadOnly(true);
 assert.equal(options.readOnly, true);
+editor.refresh();
+assert.equal(refreshes, 1);
 console.log('PASS line counts, undoable-clear integration, and read-only state');
 
 // Test the actual bundled language tokenizers with CodeMirror's Node runner.

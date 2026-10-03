@@ -7,6 +7,11 @@ const examples = {
   function: 'def square(x: float) -> float:\n    return x * x\n\nprint(square(1.5))\nprint(square(3.0))\n',
   numpy: 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x * x))\n',
 };
+const fortranExamples = {
+  sum: 'program main\n   implicit none\n   integer :: i, total\n   total = 0\n   do i = 1, 10\n      total = total + i*i\n   end do\n   print *, total\nend program main\n',
+  helper: 'program main\n   use, intrinsic :: iso_fortran_env, only: real64\n   use python_mod, only: mean\n   implicit none\n   real(real64) :: x(3) = [1.0_real64, 2.0_real64, 3.0_real64]\n   print *, mean(x)\nend program main\n',
+};
+let fortranOnly = false, previousEditMode = false;
 let token = '', commit = '', revision = 0, active = null, debounce = null, pending = false;
 let downloading = false, connecting = false;
 let serviceURL = '';
@@ -55,16 +60,49 @@ const input = createEditor(get('python'), get('python-lines'), () => {
 input.setValue(examples.sum);
 
 function buttons() {
-  for (const id of actions) get(id).disabled = !token || Boolean(active);
+  for (const id of actions) get(id).disabled = !token || Boolean(active) || (fortranOnly && id !== 'run-fortran');
   get('stop').disabled = !active || active.stopping;
   get('connect').disabled = connecting || Boolean(active);
   get('download').disabled = !downloading;
   get('compiler').disabled = !token || Boolean(active);
   get('reset-fortran').disabled = !lastTranslation || !modified() || Boolean(active);
   get('live').disabled = editing();
-  get('fortran-title').textContent = modified() ? 'Edited Fortran' : 'Generated Fortran';
+  get('fortran-title').textContent = fortranOnly ? 'Fortran input' : modified() ? 'Edited Fortran' : 'Generated Fortran';
   get('run-fortran').textContent = editing() ? 'Compile and Run Fortran' : 'Run Fortran';
+  get('fortran-only').disabled = Boolean(active);
   optionControls();
+}
+function changeLayout() {
+  if (active) { get('fortran-only').checked = fortranOnly; return; }
+  const enabled = Boolean(get('fortran-only').checked);
+  if (enabled !== fortranOnly) {
+    if (enabled) {
+      previousEditMode = editing();
+      get('edit-fortran').checked = true;
+      get('live').checked = false;
+      clearTimeout(debounce); debounce = null; pending = false;
+    } else get('edit-fortran').checked = previousEditMode;
+  }
+  fortranOnly = enabled;
+  get('run-layout').classList.toggle('fortran-only', enabled);
+  for (const id of ['python-panel', 'python-output-panel', 'python-example-label', 'example',
+    'translate', 'live-label', 'edit-fortran-label', 'reset-fortran', 'run-python', 'run-both', 'compare', 'comparison-note']) get(id).hidden = enabled;
+  get('fortran-example-label').hidden = get('fortran-example').hidden = !enabled;
+  get('page-heading').textContent = enabled ? 'Fortran playground' : 'Python → Fortran';
+  get('eyebrow').textContent = enabled ? 'EDIT · COMPILE · RUN' : 'TRANSLATE · RUN · COMPARE';
+  get('page-intro').textContent = enabled ? 'Write and run a single-file Fortran program with your chosen compiler.' : 'Run a single-file program in Python and its Fortran translation.';
+  get('execution-note').textContent = enabled ? 'Code runs only when you click Compile and Run Fortran.' : 'Programs run only when you click a Run or Compare button. Live mode only translates.';
+  get('build-heading').textContent = enabled ? 'Compilation' : 'Translation and compilation';
+  get('mode-help').textContent = enabled ? 'Compile the Fortran pane directly. Existing python_mod helpers are available automatically; additional libraries are not provided. Switch Fortran only off to return to Python without losing its code or output.' : 'Edit Fortran pauses live translation. Run Both and Compare use edited Fortran. Existing python_mod helpers are available automatically; additional libraries are not provided.';
+  document.title = enabled ? 'Fortran playground' : 'p2f — Run Python and Fortran';
+  output.setReadOnly(!editing());
+  if (enabled && !output.getValue().trim()) { revision++; setOutput(fortranExamples.sum); }
+  if (typeof location !== 'undefined' && typeof history !== 'undefined') {
+    const url = new URL(location.href);
+    if (enabled) url.searchParams.set('mode', 'fortran'); else url.searchParams.delete('mode');
+    history.replaceState(null, '', url);
+  }
+  buttons(); input.refresh(); output.refresh();
 }
 async function api(path, method = 'GET', payload) {
   const response = await fetch(`${serviceURL}/api/${path}`, {
@@ -145,7 +183,7 @@ function show(result) {
     get(timeId).textContent = value ? `${value.seconds.toFixed(2)} s` : '';
     get(outputId).textContent = value ? `${value.stdout}${value.stderr ? '\n' + value.stderr : ''}` || '(No output)' : 'Not run for this operation.';
   }
-  stage('python', 'python-output', 'python-time');
+  if (!fortranOnly) stage('python', 'python-output', 'python-time');
   stage('execution', 'fortran-output', 'fortran-time');
   stage('build', 'diagnostics', 'build-time');
   if (result.error) get('diagnostics').textContent = result.error;
@@ -156,12 +194,13 @@ function show(result) {
 }
 async function submit(mode, automatic = false) {
   if (!token || active) return;
+  if (fortranOnly && mode !== 'fortran') return;
   if (editing() && ['fortran', 'both', 'compare'].includes(mode)) mode += '-edit';
   const editJob = mode.endsWith('-edit');
   if (!editJob && mode !== 'python' && modified()) {
     if (automatic || !confirm('Replace your edited Fortran with a new translation?')) return;
   }
-  const source = input.getValue();
+  const source = fortranOnly ? '' : input.getValue();
   const fortranSource = output.getValue();
   clearTimeout(debounce); debounce = null; pending = false;
   if ((mode !== 'fortran-edit' && !source.trim()) || new TextEncoder().encode(source).length > 100000) {
@@ -214,6 +253,7 @@ get('run-both').onclick = () => submit('both');
 get('compare').onclick = () => submit('compare');
 get('connect').onclick = connect;
 get('live').onchange = schedule;
+get('fortran-only').onchange = changeLayout;
 get('edit-fortran').onchange = () => {
   revision++;
   output.setReadOnly(!editing());
@@ -245,10 +285,23 @@ get('stop').onclick = async () => {
   catch (error) { get('diagnostics').textContent = String(error); }
 };
 get('load').onclick = () => {
+  if (fortranOnly) {
+    if (output.getValue().trim() && !confirm('Replace the Fortran input with this example?')) return;
+    revision++; setOutput(fortranExamples[get('fortran-example').value || 'sum']); buttons(); output.focus();
+    get('freshness').textContent = 'Fortran example loaded; run to refresh results.';
+    return;
+  }
   if (input.getValue().trim() && !confirm('Replace the Python input with this example?')) return;
   input.setValue(examples[get('example').value]);
 };
 get('clear').onclick = () => {
+  if (fortranOnly) {
+    if (output.getValue() && !confirm('Clear the Fortran input?')) return;
+    revision++; setOutput(''); buttons();
+    for (const id of ['fortran-output', 'diagnostics', 'fortran-time', 'build-time']) get(id).textContent = '';
+    get('freshness').textContent = 'Fortran cleared; Python code and output are retained.';
+    output.focus(); return;
+  }
   if (input.getValue() && !input.undoableClear && !confirm('Clear the Python input?')) return;
   input.setValue('', true);
   if (!editing() && !modified()) { lastTranslation = ''; setOutput(''); }
@@ -263,6 +316,10 @@ get('download').onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 if (typeof window !== 'undefined') enableColoring(input, output, 'Fortran source').then(() => {
+  input.refresh(); output.refresh();
   get('editor-note').textContent = 'Syntax coloring enabled · Tab: indentation · Ctrl+Z: undo · Esc: leave editor.';
 }).catch(() => { get('editor-note').textContent = 'Plain-text editors are available.'; });
+if (typeof location !== 'undefined' && new URLSearchParams(location.search || '').get('mode') === 'fortran') {
+  get('fortran-only').checked = true; changeLayout();
+}
 await connect();
