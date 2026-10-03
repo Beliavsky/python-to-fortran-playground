@@ -34,7 +34,8 @@ assert.equal(get('translate').disabled, false);
 assert.match(get('initialization').textContent, /37.00 s/);
 for (let id = 1; id <= 2; id++) {
   get('translate').onclick();
-  assert.equal(get('clear').disabled, true);
+  assert.equal(get('clear').disabled, false);
+  assert.notEqual(get('python').readOnly, true);
   assert.equal(workers.length, 1);
   assert.equal(workers[0].sent.at(-1).id, id);
   workers[0].receive({ type: 'result', id, ok: true, fortran: 'program input',

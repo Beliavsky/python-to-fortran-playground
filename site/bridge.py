@@ -1,5 +1,6 @@
 """A translation-only entry point shared by browser and smoke tests."""
 import contextlib
+import codeop
 import io
 import copy
 import json
@@ -78,6 +79,14 @@ def prepare():
     result = json.loads(translate('print(0)'))
     if not result['ok']:
         raise RuntimeError('Warm-up translation failed: ' + result['diagnostics'])
+
+
+def syntax_status(source):
+    """Check completeness without executing input or retaining future flags."""
+    try:
+        return 'incomplete' if codeop.compile_command(source, symbol='exec') is None else 'complete'
+    except (SyntaxError, ValueError, OverflowError):
+        return 'invalid'
 
 
 def translate(source, vendor_dir='/upstream', work_dir='/work'):

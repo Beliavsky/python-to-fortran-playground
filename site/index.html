@@ -27,14 +27,17 @@
       <button id="load" type="button">Load example</button>
       <button id="clear" type="button">Clear</button>
       <button id="translate" class="primary" type="button" disabled>Translate</button>
+      <label class="live-toggle"><input id="live" type="checkbox" aria-describedby="live-note"> Live translation</label>
       <button id="cancel" type="button" disabled>Cancel</button>
     </div>
+    <p id="live-note" class="version">Optional: translate after a 750 ms typing pause. Incomplete Python waits; code is never executed.</p>
     <section class="editors" aria-label="Source editors">
       <div class="panel"><label for="python">Python input <span class="line-count" id="python-lines">0 lines</span></label><textarea id="python" spellcheck="false" aria-describedby="limits"></textarea></div>
       <div class="panel"><label for="fortran">Generated Fortran <span class="line-count" id="fortran-lines">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>
     </section>
     <div class="toolbar">
       <button id="download" type="button" disabled>Download Fortran</button>
+      <span id="fortran-state" class="version">No translation yet</span>
       <a id="helpers" href="vendor/helpers.zip" download>Download runtime helpers</a>
       <span id="status" role="status" aria-live="polite">Loading deployment information…</span>
     </div>

@@ -37,8 +37,14 @@ self.onmessage = async ({ data }) => {
     }
     const started = performance.now();
     py.globals.set('submission', data.source);
-    const result = JSON.parse(await py.runPythonAsync('translate(submission)'));
-    py.globals.delete('submission');
+    let result;
+    try {
+      const syntaxStatus = data.automatic ? py.runPython('syntax_status(submission)') : 'complete';
+      result = syntaxStatus === 'complete' ? JSON.parse(await py.runPythonAsync('translate(submission)'))
+        : { ok: false, syntaxStatus };
+    } finally {
+      py.globals.delete('submission');
+    }
     self.postMessage({ type: 'result', id: data.id, ...result,
       translationSeconds: (performance.now() - started) / 1000, commit: manifest.commit });
   } catch (error) {

@@ -111,7 +111,7 @@ plain textareas remain usable and Clear asks before discarding nonempty input.
 The Python editor supports four-space Tab indentation, line numbers, and
 Ctrl+Z (Cmd+Z on macOS). Clear is one undoable edit in the enhanced editor;
 it also clears the translation and diagnostics and focuses Python input.
-It does not restart the worker and is disabled during a translation.
+It does not restart the worker and remains available during a translation.
 The Fortran editor remains read-only, with text selection and copying allowed.
 Esc blurs the editor so keyboard users can move to the next control.
 Both headings count physical lines including comments and blank lines; one
@@ -125,3 +125,24 @@ initialization plus warm-up. The four translations then took 0.45-0.56 seconds
 each, including the per-job state reset. Initialization runs when the page
 loads; it is not repeated on each Translate click. Reloading the page or
 restarting a cancelled worker still incurs initialization again.
+
+Live translation
+----------------
+Enable the optional Live translation checkbox to translate the entire Python
+buffer after a 750 ms typing pause. It is off by default. The persistent worker
+checks Python completeness without executing it. Unfinished or invalid syntax
+quietly waits; click Translate for explicit syntax diagnostics. Valid but
+unsupported Python still reports the transpiler's diagnostic.
+
+Editing, Clear, and loading examples remain available while translating.
+Only one request runs at a time; edits coalesce into the newest pending buffer.
+Old results cannot replace newer input. The previous Fortran stays visible,
+marked stale, and Download is disabled until a current translation succeeds.
+Clear removes both buffers' results. Turning live mode off cancels pending
+automatic requests, but lets an in-flight request finish. Cancel and timeouts
+stop the worker and pause live mode to prevent automatic restart loops.
+No submitted program is ever executed or compiled, in either mode.
+
+This is part of the existing playground, not a separate site. Its published
+transpiler pin is unchanged. After committing and pushing this repository,
+the existing GitHub Pages workflow tests and deploys the live-capable version.

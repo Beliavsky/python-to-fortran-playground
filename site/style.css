@@ -14,6 +14,9 @@ button, select { font: inherit; font-size: 14px; border: 1px solid #aebfba; bord
 button { cursor: pointer; }
 button.primary { background: #126f60; color: white; border-color: #126f60; }
 button:disabled { opacity: .5; cursor: default; }
+.live-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; cursor: pointer; }
+.live-toggle input { width: 17px; height: 17px; accent-color: #126f60; }
+#live-note { margin: -5px 0 16px; }
 :focus-visible { outline: 3px solid #d89628; outline-offset: 3px; }
 .editors { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .panel { background: white; border: 1px solid #c4d1cc; border-radius: 8px; overflow: hidden; }

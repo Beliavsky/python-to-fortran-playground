@@ -14,6 +14,16 @@ py.unpackArchive(new Uint8Array(zip), 'zip', { extractDir: '/upstream' });
 await py.runPythonAsync("import sys\nsys.path.insert(0, '/upstream')");
 await py.runPythonAsync(await readFile(new URL('site/bridge.py', root), 'utf8'));
 console.timeEnd('Runtime startup');
+for (const [source, expected] of [
+  ['def f():\n', 'incomplete'], ['x = [1,\n', 'incomplete'],
+  ['def f(:\n', 'invalid'], ['print(1)\n', 'complete'],
+  ['def f():\n    return 1\n', 'complete'], ['raise RuntimeError("NOT_EXECUTED")\n', 'complete'],
+]) {
+  py.globals.set('submission', source);
+  assert.equal(py.runPython('syntax_status(submission)'), expected);
+}
+assert.equal(py.runPython("'f' in globals()"), false);
+console.log('PASS live syntax checks without execution');
 console.time('Transpiler initialization');
 await py.runPythonAsync('prepare()');
 console.timeEnd('Transpiler initialization');
