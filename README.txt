@@ -205,6 +205,17 @@ and the software remains subject to Intel's applicable licence terms. No
 separate compiler account token is passed to submitted jobs. Building the
 optional image adds download/build time and Modal compute usage.
 
+Both images precompile python.f90 and lapack_d.f90 once, separately for GNU
+and Intel with the same options used by execution jobs. Each job copies the
+object/module files into its own temporary directory; writable caches are
+never shared between visitors. Source hashes, compiler version/options, and
+artifact checksums must match before reuse. Missing or incompatible caches
+fall back to ordinary helper compilation. Changing the pin or build scripts
+selects a new runtime image and rebuilds the helpers. This reduces repeated
+compilation time and Modal compute usage, not the number of jobs charged
+against the service's daily allowance. Local preview without an image cache
+continues to compile normally.
+
 The parent python.f90 must include the portability fix that declares the string
 argument before the result length in to_lower/to_upper. Older published pins
 (including 51cb68b) fail Intel's helper compilation. Publish that parent fix,

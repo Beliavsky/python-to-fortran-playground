@@ -21,7 +21,7 @@ def runtime_image_name():
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
     for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
-                     'xverify_intel.py', 'upstream.json',
+                     'xverify_intel.py', 'xprecompile.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
         digest.update((ROOT / filename).read_bytes())
     return 'p2f-runtime-' + digest.hexdigest()[:20]
@@ -36,6 +36,7 @@ job_image = (
     .apt_install('gfortran')
     .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
     .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
     .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
     .add_local_file(ROOT / 'upstream.json', '/opt/p2f/upstream.json', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/site/vendor/manifest.json', copy=True)
@@ -43,6 +44,7 @@ job_image = (
     .run_commands(
         'mkdir -p /opt/p2f/runtime /work',
         "PYTHONPATH=/opt/p2f python -c \"from pathlib import Path; from xrun import unpack_runtime; unpack_runtime(Path('/opt/p2f/runtime'))\"",
+        'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran',
         'chmod 1777 /work',
     )
     .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
@@ -58,6 +60,7 @@ intel_installed_image = (
     .run_commands('bash /opt/p2f/xinstall_intel.sh')
 )
 intel_job_image = intel_installed_image.run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py ifx',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
 
 api_image = (

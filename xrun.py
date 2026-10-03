@@ -27,6 +27,42 @@ DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 COMPILERS = {"gfortran", "ifx"}
 
 
+def helper_identity(runtime, command):
+    """Fingerprint sources and the exact compiler/options used for helpers."""
+    version = subprocess.run(shlex.split(command) + ['--version'], capture_output=True,
+                             text=True, check=True, timeout=15)
+    return {'command': command, 'version': version.stdout + version.stderr,
+            'sources': {name: hashlib.sha256((runtime / name).read_bytes()).hexdigest()
+                        for name in ('python.f90', 'lapack_d.f90')}}
+
+
+def seed_helper_cache(runtime, job, name, command):
+    """Copy verified image artifacts into a private job; otherwise compile normally."""
+    cache = runtime / 'precompiled' / name
+    try:
+        manifest = json.loads((cache / 'manifest.json').read_text(encoding='utf-8'))
+        if manifest['identity'] != helper_identity(runtime, command):
+            return False
+        artifacts = manifest['artifacts']
+        if not {'python.o', 'lapack_d.o', 'python.o.flags', 'lapack_d.o.flags'} <= artifacts.keys():
+            return False
+        for filename, digest in artifacts.items():
+            if Path(filename).name != filename or '\\' in filename:
+                return False
+            if hashlib.sha256((cache / filename).read_bytes()).hexdigest() != digest:
+                return False
+        for filename in artifacts:
+            # copyfile gives objects current timestamps for upstream's source-mtime check.
+            shutil.copyfile(cache / filename, job / filename)
+        return True
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        # Remove only cache artifacts we may have copied, not submitted source.
+        for path in job.iterdir():
+            if path.suffix in {'.o', '.mod', '.smod', '.flags'}:
+                path.unlink(missing_ok=True)
+        return False
+
+
 def compiler_command(name, default=DEFAULT_COMPILER):
     """Map a browser choice to a trusted command, never accept browser flags."""
     if name == "gfortran":
@@ -173,6 +209,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         if mode != "python":
             command = [sys.executable, str(runtime / "xp2f.py"), "input.py", "--flat", "--out", "input_p.f90"]
             if mode != "translate":
+                result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
                 command += ["--compile", "--compiler", command_text]
             result["build"] = run_command(command, ft, cancel, 180)
             output = ft / "input_p.f90"

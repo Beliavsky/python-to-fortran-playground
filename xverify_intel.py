@@ -16,6 +16,8 @@ def main():
         result = execute(runtime, source, 'compare', threading.Event(), compiler_name='ifx')
         if not result['ok']:
             raise RuntimeError(str(result))
+        if not result.get('precompiled_helpers') or 'Build helper:' in result['build']['stdout']:
+            raise RuntimeError('Intel image did not reuse its precompiled helpers')
         print('Intel compare: PASS', flush=True)
 
 

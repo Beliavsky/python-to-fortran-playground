@@ -12,6 +12,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import xrun
+from xprecompile import precompile
 
 
 class ExecutionTests(unittest.TestCase):
@@ -87,6 +88,53 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(result['compiler'], 'ifx')
             self.assertIn('unavailable', result['error'])
             run.assert_not_called()
+
+    def test_helper_cache_rejects_incompatible_or_damaged_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            cache = runtime / 'precompiled' / 'gfortran'
+            cache.mkdir(parents=True)
+            job = runtime / 'job'
+            job.mkdir()
+            identity = {'command': 'test', 'version': 'v1', 'sources': {}}
+            artifacts = {}
+            import hashlib
+            for name in ('python.o', 'lapack_d.o', 'python.o.flags', 'lapack_d.o.flags', 'python_mod.mod'):
+                (cache / name).write_bytes(b'cached')
+                artifacts[name] = hashlib.sha256(b'cached').hexdigest()
+            manifest = {'identity': identity, 'artifacts': artifacts}
+            (cache / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            with patch('xrun.helper_identity', return_value=identity):
+                self.assertTrue(xrun.seed_helper_cache(runtime, job, 'gfortran', 'test'))
+                (job / 'python.o').write_bytes(b'private change')
+                self.assertEqual((cache / 'python.o').read_bytes(), b'cached')
+                self.assertFalse(xrun.seed_helper_cache(runtime, job, 'ifx', 'test'))
+                (cache / 'python.o').write_bytes(b'corrupt')
+                self.assertFalse(xrun.seed_helper_cache(runtime, job, 'gfortran', 'test'))
+            with patch('xrun.helper_identity', return_value={**identity, 'version': 'v2'}):
+                self.assertFalse(xrun.seed_helper_cache(runtime, job, 'gfortran', 'test'))
+
+    @unittest.skipUnless(shutil.which('gfortran'), 'gfortran required')
+    def test_precompiled_helpers_are_reused_and_fallback_still_works(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            xrun.unpack_runtime(runtime)
+            precompile(runtime, 'gfortran')
+            cases = [
+                'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.mean(x), np.std(x))\n',
+                'import numpy as np\na = np.array([[2.0, 0.0], [0.0, 4.0]])\nb = np.array([2.0, 8.0])\nx = np.linalg.solve(a,b)\nprint(x[0], x[1])\n',
+            ]
+            for source in cases:
+                result = xrun.execute(runtime, source, 'compare', threading.Event())
+                self.assertTrue(result['ok'], result)
+                self.assertTrue(result['precompiled_helpers'], result)
+                self.assertNotIn('Build helper:', result['build']['stdout'])
+            # Corrupt cache: normal compilation must recover, not link stale objects.
+            (runtime / 'precompiled/gfortran/python.o').write_bytes(b'bad object')
+            result = xrun.execute(runtime, cases[0], 'compare', threading.Event())
+            self.assertTrue(result['ok'], result)
+            self.assertFalse(result['precompiled_helpers'])
+            self.assertIn('Build helper:', result['build']['stdout'])
 
     @unittest.skipUnless(shutil.which('ifx') or shutil.which('p2f-ifx'), 'Intel compiler required')
     def test_intel_compiles_helpers_and_matches_python(self):
