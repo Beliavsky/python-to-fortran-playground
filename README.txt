@@ -114,8 +114,73 @@ The included workflow builds the pinned bundle, runs smoke tests, and only
 deploys after they pass. Use HTTPS; relative asset URLs support project Pages.
 The translation-only site is published at
 https://beliavsky.github.io/python-to-fortran-playground/ . The /run/ page is
-included in the same Pages build; its local execution service is started
-separately with xrun.py.
+included in the same Pages build. xrun.py serves trusted local executions;
+xmodal.py deploys the optional hosted API.
+
+Hosted execution with Modal
+---------------------------
+The account that deploys the API pays for visitors' executions. Modal's
+published Starter plan currently includes $30/month of compute credits;
+check current prices at https://modal.com/pricing . Before public deployment,
+set a Workspace usage budget and spend limit in Modal's Usage & Billing page.
+https://modal.com/docs/guide/budgets explains that usage budgets apply before
+credits; spend limits cap net charges after credits. Job-count limits below
+are not dollar spending caps, and API requests also consume resources.
+
+Create a Modal account, then run on Windows:
+  cd C:\python\python-to-fortran-playground
+  python -m venv .venv-execution
+  .venv-execution\Scripts\python.exe -m pip install -r requirements-execution.txt
+  .venv-execution\Scripts\python.exe -m modal token new
+  python xvendor.py
+  .venv-execution\Scripts\python.exe -m modal deploy xmodal.py
+
+Deployment prints an HTTPS origin ending in .modal.run. Configure the page:
+  python xconnect_service.py https://YOUR-DEPLOYED-SERVICE.modal.run
+This checks the API's health, pinned revision, and isolation configuration,
+then writes site\run\service.json. Commit that file and push; the Pages build
+publishes it. service.json contains a public endpoint URL, never credentials.
+Modal account tokens stay outside the repository and submitted sandboxes.
+
+The page fetches service.json on connection, verifies the API's pinned revision
+against its vendor manifest, and sends jobs to that HTTPS API. The API accepts
+the GitHub Pages origin and local preview origins. Each browser receives its
+own temporary session token; jobs and cancellation are restricted to their
+owner. CORS is a browser policy, not protection from automated clients.
+
+Each execution runs as an unprivileged user in a new gVisor sandbox, with
+networking blocked, no secrets or shared volumes, at most one physical CPU
+core and 1 GiB memory, a 250-second sandbox lifetime, 30 seconds per program,
+and the existing source/output limits. Unix limits cap individual files at
+16 MiB, processes at 128, and open files at 128. The sandbox's root filesystem
+quota is supplied by Modal; the file-size limit is not a total-disk quota.
+The image includes gfortran, NumPy, SciPy, pandas, and the verified pinned
+transpiler/helpers. Visitors do not need these installed on their computers.
+
+The API admits two simultaneous jobs, 30 starts per address per ten minutes,
+and 100 total starts per UTC day (including translation/live requests).
+Limits and ownership survive an API restart in Modal's persistent Dict.
+The single API container serializes state changes. Unfinished provisioning
+reserves a slot conservatively for ten minutes if interrupted. Do not delete
+the state Dict to reset usage. Review limits in xpublic_api.py before changing
+them; deployed API traffic and image builds have their own costs.
+
+Input is sent to the sandbox but not stored in the state Dict. Results and job
+metadata expire five minutes after completion and are pruned on subsequent
+requests. Modal may retain sandbox output logs under its account log policy.
+The service scales down when idle. Localhost previews always use xrun.py,
+even when service.json names the public API.
+
+To stop public execution, stop p2f-playground-execution in the Modal dashboard.
+The original translation-only playground remains independent.
+
+Public API and hosted-connection checks:
+  .venv-execution\Scripts\python.exe -m unittest discover -s tests -p test_public_api.py
+  node tests/public_ui.mjs
+These use a fake sandbox provider and check ownership, limits, CORS, expiry,
+endpoint selection, HTTPS validation, and revision mismatch handling. A real
+Modal deployment still needs verification with Run Both and Compare before
+calling public execution operational.
 
 Local validation, 2026-10-02
 ----------------------------

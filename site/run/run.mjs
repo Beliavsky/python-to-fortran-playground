@@ -9,6 +9,7 @@ const examples = {
 };
 let token = '', commit = '', revision = 0, active = null, debounce = null, pending = false;
 let downloading = false, connecting = false;
+let serviceURL = '';
 const output = createEditor(get('fortran'), get('fortran-lines'));
 const input = createEditor(get('python'), get('python-lines'), () => {
   revision++;
@@ -26,14 +27,14 @@ function buttons() {
   get('download').disabled = !downloading;
 }
 async function api(path, method = 'GET', payload) {
-  const response = await fetch(`/api/${path}`, {
+  const response = await fetch(`${serviceURL}/api/${path}`, {
     method, cache: 'no-store',
     headers: { 'X-P2F-Token': token, ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
   });
   let result;
   try { result = await response.json(); }
-  catch { throw new Error('Execution service is unavailable. Start python xrun.py and open its /run/ page.'); }
+  catch { throw new Error('Execution service returned an invalid response. Try Reconnect.'); }
   if (!response.ok) throw new Error(result.error || `Service returned ${response.status}`);
   return result;
 }
@@ -41,6 +42,18 @@ async function connect() {
   if (active || connecting) return;
   connecting = true; token = ''; buttons();
   try {
+    const configResponse = await fetch('./service.json', { cache: 'no-store' });
+    if (!configResponse.ok) throw new Error('Execution service configuration is unavailable.');
+    const config = await configResponse.json();
+    // A localhost preview always uses its own trusted local service.
+    const local = typeof location !== 'undefined' && ['127.0.0.1', 'localhost'].includes(location.hostname);
+    serviceURL = local ? '' : (config.url || '').replace(/\/$/, '');
+    if (serviceURL) {
+      const url = new URL(serviceURL);
+      if (url.protocol !== 'https:' || !url.hostname.endsWith('.modal.run') || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+        throw new Error('Expected the HTTPS origin of the deployed Modal service.');
+      }
+    }
     const session = await api('session');
     const response = await fetch('../vendor/manifest.json', { cache: 'no-store' });
     if (!response.ok) throw new Error('Published transpiler manifest is unavailable.');
@@ -51,7 +64,7 @@ async function connect() {
     get('status').textContent = 'Ready';
     if (get('live').checked) schedule();
   } catch (error) {
-    get('connection').textContent = 'Execution service unavailable. For the local preview, run python xrun.py and open http://127.0.0.1:8766/run/.';
+    get('connection').textContent = serviceURL ? 'Execution service unavailable. Try Reconnect; a hosted service may take a moment to start.' : 'A hosted execution service has not been configured. For the local preview, run python xrun.py and open http://127.0.0.1:8766/run/.';
     get('diagnostics').textContent = String(error);
     get('status').textContent = 'Not connected';
   } finally { connecting = false; buttons(); }

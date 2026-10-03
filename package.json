@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/editors.mjs && node tests/ui.mjs && node tests/live.mjs && node tests/run_ui.mjs && node tests/smoke.mjs"
+    "test": "node tests/editors.mjs && node tests/ui.mjs && node tests/live.mjs && node tests/run_ui.mjs && node tests/public_ui.mjs && node tests/smoke.mjs"
   },
   "devDependencies": {
     "codemirror": "5.65.20",

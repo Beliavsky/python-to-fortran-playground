@@ -13,7 +13,8 @@ let stoppedBeforeCreated = false;
 const sleep = setTimeout;
 globalThis.fetch = async (url, options = {}) => {
   let payload;
-  if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', timeout: 30 };
+  if (url === './service.json') payload = { url: '' };
+  else if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', timeout: 30 };
   else if (url === '../vendor/manifest.json') payload = { commit: '123abcdef' };
   else if (url === '/api/jobs') {
     created = JSON.parse(options.body); jobNumber++;
