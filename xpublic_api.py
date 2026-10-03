@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import time
 
@@ -100,9 +101,10 @@ class PublicService:
             try:
                 sandbox = await self.runner.start(payload)
             except Exception:
+                logging.getLogger(__name__).exception('Sandbox provisioning failed')
                 board['jobs'][identifier]['state'] = 'done'
                 await self.store.put('board', board)
-                raise HTTPException(503, 'Could not start an execution environment. Try Reconnect.')
+                raise HTTPException(503, 'Could not start an execution environment. The service owner should check the Modal logs.')
             board['jobs'][identifier] = {'owner': owner, 'sandbox': sandbox, 'state': 'running', 'expires': self.clock() + 600}
             await self.store.put('board', board)
             return {'id': identifier}

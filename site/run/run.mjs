@@ -35,7 +35,11 @@ async function api(path, method = 'GET', payload) {
   let result;
   try { result = await response.json(); }
   catch { throw new Error('Execution service returned an invalid response. Try Reconnect.'); }
-  if (!response.ok) throw new Error(result.error || `Service returned ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(result.error || `Service returned ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 async function connect() {
@@ -129,7 +133,12 @@ async function submit(mode, automatic = false) {
     if (job.id) api(`jobs/${job.id}/cancel`, 'POST', {}).catch(() => {});
     get('status').textContent = 'Execution request failed';
     get('diagnostics').textContent = String(error);
-    token = '';
+    // A failed job does not invalidate a healthy session. Require Reconnect
+    // only for an authentication failure or an unreadable/network response.
+    if (!error.status || error.status === 401 || error.status === 403) token = '';
+    pending = false;
+    clearTimeout(debounce); debounce = null;
+    get('live').checked = false;
   } finally {
     if (active === job) active = null;
     buttons();

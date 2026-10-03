@@ -10,6 +10,7 @@ globalThis.confirm = () => true;
 const get = id => elements.get(id);
 let state, created, cancellation = 0, jobNumber = 0;
 let stoppedBeforeCreated = false;
+let submissionStatus = 202;
 const sleep = setTimeout;
 globalThis.fetch = async (url, options = {}) => {
   let payload;
@@ -20,10 +21,11 @@ globalThis.fetch = async (url, options = {}) => {
     created = JSON.parse(options.body); jobNumber++;
     assert.equal(options.headers['X-P2F-Token'], 'test-token');
     if (stoppedBeforeCreated) await new Promise(resolve => sleep(resolve, 10));
-    payload = { id: String(jobNumber) };
+    payload = submissionStatus === 202 ? { id: String(jobNumber) } : { error: 'Provisioning failed' };
   } else if (url.endsWith('/cancel')) { cancellation++; payload = { cancelled: true }; }
   else payload = state;
-  return { ok: true, json: async () => payload };
+  const status = url === '/api/jobs' ? submissionStatus : 200;
+  return { ok: status < 400, status, json: async () => payload };
 };
 await import('../site/run/run.mjs');
 assert.equal(get('run-both').disabled, false);
@@ -68,4 +70,16 @@ assert.equal(get('run-python').disabled, false);
 get('clear').onclick();
 assert.equal(get('python-lines').textContent, '0 lines');
 assert.equal(get('fortran-lines').textContent, '0 lines');
+get('python').value = 'print(1)'; get('python').listeners.input();
+submissionStatus = 503;
+await get('translate').onclick();
+assert.match(get('diagnostics').textContent, /Provisioning failed/);
+assert.equal(get('translate').disabled, false);
+assert.equal(get('run-both').disabled, false);
+submissionStatus = 429;
+await get('run-python').onclick();
+assert.equal(get('run-python').disabled, false);
+submissionStatus = 403;
+await get('translate').onclick();
+assert.equal(get('translate').disabled, true);
 console.log('Execution UI: outputs, timings, stale results, early Stop, and Clear passed');

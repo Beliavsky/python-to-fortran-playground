@@ -116,6 +116,18 @@ class PublicTests(unittest.TestCase):
         self.now += 3601
         self.assertEqual(self.submit().status_code, 403)
 
+    def test_provisioning_failure_logged_and_slot_released(self):
+        async def failure(_payload):
+            raise FileNotFoundError('missing build source')
+        self.runner.start = failure
+        with self.assertLogs('xpublic_api', level='ERROR') as logs:
+            response = self.submit()
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('missing build source', '\n'.join(logs.output))
+        self.assertNotIn('Try Reconnect', response.json()['error'])
+        self.assertEqual(self.store.data['board']['daily'], 1)
+        self.assertTrue(all(job['state'] == 'done' for job in self.store.data['board']['jobs'].values()))
+
 
 if __name__ == '__main__':
     unittest.main()

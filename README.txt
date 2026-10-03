@@ -133,7 +133,13 @@ Create a Modal account, then run on Windows:
   .venv-execution\Scripts\python.exe -m pip install -r requirements-execution.txt
   .venv-execution\Scripts\python.exe -m modal token new
   python xvendor.py
-  .venv-execution\Scripts\python.exe -m modal deploy xmodal.py
+  .venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py
+
+Use xdeploy_service.py for later service updates too. It builds and publishes
+an immutable, content-named job image from the local checkout before deploying
+the API. The API only references that published image; it cannot upload local
+files from inside its runtime container. Running modal deploy directly does
+not build/publish a new job image.
 
 Deployment prints an HTTPS origin ending in .modal.run. Configure the page:
   python xconnect_service.py https://YOUR-DEPLOYED-SERVICE.modal.run
@@ -177,10 +183,12 @@ The original translation-only playground remains independent.
 Public API and hosted-connection checks:
   .venv-execution\Scripts\python.exe -m unittest discover -s tests -p test_public_api.py
   node tests/public_ui.mjs
+  .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py
 These use a fake sandbox provider and check ownership, limits, CORS, expiry,
 endpoint selection, HTTPS validation, and revision mismatch handling. A real
-Modal deployment still needs verification with Run Both and Compare before
-calling public execution operational.
+Modal deployment needs a live check before calling public execution operational.
+xcheck_service.py uses three real jobs to check the unprivileged Python user
+and matching Python/Fortran results for basic arithmetic and NumPy.
 
 Local validation, 2026-10-02
 ----------------------------

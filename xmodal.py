@@ -1,9 +1,11 @@
-"""Deploy the public execution API: python -m modal deploy xmodal.py.
+"""Public execution API; build and deploy using python xdeploy_service.py.
 
 User code runs only in fresh, network-blocked gVisor sandboxes. The API
 container owns the Modal client and persistent limits; neither is in a job.
 """
 import json
+import hashlib
+import os
 from pathlib import Path
 
 import modal
@@ -11,6 +13,20 @@ import modal
 ROOT = Path(__file__).resolve().parent
 app = modal.App('p2f-playground-execution')
 state = modal.Dict.from_name('p2f-playground-execution-state', create_if_missing=True)
+
+
+def runtime_image_name():
+    if not modal.is_local():
+        return os.environ['P2F_RUNTIME_IMAGE_NAME']
+    digest = hashlib.sha256()
+    # Changing an execution dependency selects a new immutable named image.
+    for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'upstream.json',
+                     'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
+        digest.update((ROOT / filename).read_bytes())
+    return 'p2f-runtime-' + digest.hexdigest()[:20]
+
+
+RUNTIME_IMAGE_NAME = runtime_image_name()
 
 job_image = (
     modal.Image.debian_slim(python_version='3.12')
@@ -27,12 +43,12 @@ job_image = (
         'chmod 1777 /work',
     )
     .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
-    .dockerfile_commands('USER 65534:65534')
 )
 
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
     .pip_install('fastapi==0.142.2')
+    .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/manifest.json', copy=True)
 )
@@ -53,7 +69,9 @@ class Sandboxes:
     async def start(self, payload):
         sandbox = await modal.Sandbox.create.aio(
             'python', '/opt/p2f/xsandbox_worker.py',
-            app=app, image=job_image, runtime='gvisor',
+            # Runtime containers cannot upload files from the developer's
+            # checkout. Resolve the image built and published before deploy.
+            app=app, image=modal.Image.from_name(RUNTIME_IMAGE_NAME), runtime='gvisor',
             workdir='/work', block_network=True,
             cpu=(0.5, 1.0), memory=(512, 1024), timeout=250,
             secrets=[], volumes={}, include_oidc_identity_token=False,

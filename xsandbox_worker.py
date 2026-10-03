@@ -1,5 +1,6 @@
 """Run one submitted job INSIDE a disposable, network-blocked Modal sandbox."""
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -8,6 +9,13 @@ from xrun import execute
 
 
 def main():
+    # Modal ignores Dockerfile USER. Drop privileges explicitly and fail closed.
+    if os.geteuid() == 0:
+        os.setgroups([])
+        os.setgid(65534)
+        os.setuid(65534)
+    if os.geteuid() == 0:
+        raise RuntimeError('Refusing to execute submitted code as root')
     # These extra Unix limits complement the enclosing sandbox's hard CPU,
     # memory, network, filesystem isolation, and wall-clock limits.
     import resource
