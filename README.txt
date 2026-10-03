@@ -1,8 +1,45 @@
 Python-to-Fortran playground (local prototype)
 =============================================
 
-Separate project, not yet published to GitHub. Translation only: no compiler,
-program execution, user accounts, or server-side translation endpoint.
+The existing GitHub Pages homepage translates in the browser. The optional
+/run/ page adds execution using a local service; the homepage remains available.
+
+Execution preview on Windows
+----------------------------
+  cd C:\python\python-to-fortran-playground
+  python xvendor.py
+  npm ci
+  python xeditor.py
+  python xrun.py
+Then open http://127.0.0.1:8766/run/. Python packages used by submitted programs
+must be installed in the Python environment running xrun.py. gfortran must be
+on PATH, or pass --compiler C:\path\to\gfortran.exe. --timeout 30 limits each
+program run; translation/compilation has a separate 180-second limit.
+
+Run Python, Run Fortran, Run Both, Compare outputs, and Stop are supported.
+Python and Fortran stdout/stderr and timings appear separately; compilation
+diagnostics remain visible. Translate and optional 750 ms live translation
+never run submitted programs. Each operation uses fresh temporary directories,
+with Python and Fortran files separated. Edits invalidate prior results; late
+results are discarded. Source and generated Fortran are not stored persistently.
+
+The service verifies and extracts the same pinned vendor bundle used by the
+browser, never a local xp2f.py checkout. Fortran builds use the upstream CLI
+and matching helpers. Comparison ignores whitespace and compares numeric
+tokens with absolute/relative tolerance 1e-10; random draws are not replayed.
+Program timings include process startup, and compilation is timed separately.
+
+This service is for TRUSTED LOCAL USE: programs run with your Windows account's
+permissions. It binds only to 127.0.0.1, checks Host and Origin, requires a
+session token, limits input/output and concurrent jobs, and cancels process
+trees. These controls are not a security sandbox. Do not expose the service
+through a tunnel or reverse proxy. Public execution needs disposable isolated
+jobs, CPU/memory/disk/process limits, disabled networking, and rate limits.
+GitHub Pages can publish /run/, but execution there remains unavailable until
+a sandboxed service is configured. The local preview works immediately.
+
+Execution checks (gfortran and NumPy required for the integration examples):
+  python -m unittest discover -s tests -p test_execution.py
 
 Start on Windows:
   cd C:\python\python-to-fortran-playground
@@ -75,8 +112,10 @@ Initialize this directory with main as its default branch and push the source.
 In that repository's Settings > Pages, select GitHub Actions as the source.
 The included workflow builds the pinned bundle, runs smoke tests, and only
 deploys after they pass. Use HTTPS; relative asset URLs support project Pages.
-No GitHub repository, remote, deployment, or public site has been created yet.
-Review licensing and the public-facing limitations before publishing.
+The translation-only site is published at
+https://beliavsky.github.io/python-to-fortran-playground/ . The /run/ page is
+included in the same Pages build; its local execution service is started
+separately with xrun.py.
 
 Local validation, 2026-10-02
 ----------------------------
@@ -89,7 +128,7 @@ in that same interpreter took 0.36-0.44 seconds. The updated browser design
 retains the interpreter and restores upstream state between translations;
 the cold-start cost is paid once per worker instead of on every submission.
 No connected browser was available for visual or click-through verification.
-The website has not been publicly deployed.
+These measurements describe the original local prototype before deployment.
 
 Editor features
 ---------------

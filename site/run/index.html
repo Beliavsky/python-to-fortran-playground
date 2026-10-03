@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>p2f — Run Python and Fortran</title>
+  <link rel="stylesheet" href="../editor-vendor/codemirror.css">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="run.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">TRANSLATE · RUN · COMPARE</p>
+      <h1>Python <span>→</span> Fortran</h1>
+      <p>Run a single-file program in Python and its Fortran translation.</p>
+      <p><a href="../">Open the translation-only playground</a></p>
+      <p id="connection" role="status">Connecting to the execution service…</p>
+      <p class="version">Programs run only when you click a Run or Compare button. Live mode only translates.</p>
+    </header>
+    <div class="toolbar">
+      <label for="example">Example</label>
+      <select id="example"><option value="sum">Sum of squares</option><option value="function">A numerical function</option><option value="numpy">NumPy array</option></select>
+      <button id="load" type="button">Load example</button>
+      <button id="clear" type="button">Clear</button>
+      <button id="connect" type="button">Reconnect</button>
+      <button id="translate" type="button" disabled>Translate</button>
+      <label class="live-toggle"><input id="live" type="checkbox"> Live translation</label>
+    </div>
+    <section class="editors" aria-label="Source editors">
+      <div class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
+      <div class="panel"><label for="fortran">Generated Fortran <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>
+    </section>
+    <div class="toolbar">
+      <button id="run-python" type="button" disabled>Run Python</button>
+      <button id="run-fortran" type="button" disabled>Run Fortran</button>
+      <button id="run-both" class="primary" type="button" disabled>Run Both</button>
+      <button id="compare" type="button" disabled>Compare outputs</button>
+      <button id="stop" type="button" disabled>Stop</button>
+      <button id="download" type="button" disabled>Download Fortran</button>
+      <span id="status" role="status" aria-live="polite">Connecting…</span>
+    </div>
+    <p id="freshness" class="version">No results yet.</p>
+    <section class="editors" aria-label="Program output">
+      <div class="diagnostics"><h2>Python output <span id="python-time" class="line-count"></span></h2><pre id="python-output">Not run.</pre></div>
+      <div class="diagnostics"><h2>Fortran output <span id="fortran-time" class="line-count"></span></h2><pre id="fortran-output">Not run.</pre></div>
+    </section>
+    <section class="diagnostics build"><h2>Translation and compilation <span id="build-time" class="line-count"></span></h2><pre id="diagnostics">No translation yet.</pre></section>
+    <footer>
+      <p id="editor-note">Loading syntax coloring…</p>
+      <p>100 KB source limit · 200 KB per output stream · no interactive input · each run starts afresh.</p>
+      <p>Comparison ignores whitespace and allows numerical differences within 1e-10 absolute or relative tolerance. Random draws can differ between Python and Fortran.</p>
+      <p>Execution sends the source to the connected service. This preview uses a trusted local service; public execution hosting is not configured.</p>
+    </footer>
+  </main>
+  <script type="module" src="run.mjs"></script>
+</body>
+</html>

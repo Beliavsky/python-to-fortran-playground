@@ -1,0 +1,3 @@
+.build { margin-top: 18px; }
+.diagnostics pre { max-height: 360px; overflow: auto; }
+#connection { font-size: 14px; }
