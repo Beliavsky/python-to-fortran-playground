@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
 MAX_OUTPUT = 200_000
 MODES = {"translate", "python", "fortran", "both", "compare"}
+# Apply to helper compilation as well as generated source via upstream --compiler.
+DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 
 
 def unpack_runtime(destination):
@@ -124,7 +126,7 @@ def compare_outputs(left, right, tolerance=1e-10):
     return True
 
 
-def execute(runtime, source, mode, cancel, compiler="gfortran", timeout=30, automatic=False):
+def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0}
     if automatic:
@@ -283,7 +285,8 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8766)
-    parser.add_argument("--compiler", default="gfortran")
+    parser.add_argument("--compiler", default=DEFAULT_COMPILER,
+                        help="Compiler command including flags (default: %(default)s)")
     parser.add_argument("--timeout", type=float, default=30, help="Maximum seconds per program run")
     options = parser.parse_args()
     if not 0 < options.timeout <= 300:

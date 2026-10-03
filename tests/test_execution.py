@@ -27,7 +27,9 @@ class ExecutionTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("gfortran"), "gfortran required")
     def test_pinned_python_and_fortran_match(self):
         for source in ("total = 0\nfor i in range(1, 11):\n    total += i * i\nprint(total)\n",
-                       "import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x*x))\n"):
+                       # mean/std require python.f90: np.sum alone is intrinsic
+                       # and missed helper compilation failures (long lines).
+                       "import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x*x), np.mean(x), np.std(x))\n"):
             with self.subTest(source=source):
                 result = xrun.execute(self.runtime, source, "compare", threading.Event())
                 self.assertTrue(result["ok"], result)
@@ -35,6 +37,7 @@ class ExecutionTests(unittest.TestCase):
                 self.assertIn("program input", result["fortran"])
                 for stage in ("build", "python", "execution"):
                     self.assertGreater(result[stage]["seconds"], 0)
+                self.assertIn("-ffree-line-length-none", result["build"]["stdout"])
 
     def test_failures_incomplete_input_and_translation_never_execute(self):
         result = xrun.execute(self.runtime, "raise RuntimeError('test error')", "python", threading.Event())

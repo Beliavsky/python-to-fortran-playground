@@ -28,6 +28,9 @@ browser, never a local xp2f.py checkout. Fortran builds use the upstream CLI
 and matching helpers. Comparison ignores whitespace and compares numeric
 tokens with absolute/relative tolerance 1e-10; random draws are not replayed.
 Program timings include process startup, and compilation is timed separately.
+The default compiler command is gfortran -ffree-line-length-none, applying
+to both generated code and bundled helpers that contain lines over 132 columns.
+For local --compiler overrides, include the appropriate flags for that compiler.
 
 This service is for TRUSTED LOCAL USE: programs run with your Windows account's
 permissions. It binds only to 127.0.0.1, checks Host and Origin, requires a

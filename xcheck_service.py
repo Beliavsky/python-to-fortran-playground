@@ -28,7 +28,8 @@ def main():
     cases = [
         ('unprivileged Python', 'python', 'import os\nprint(os.geteuid())\n', '65534'),
         ('sum of squares', 'compare', 'total = 0\nfor i in range(1, 11):\n    total += i*i\nprint(total)\n', '385'),
-        ('NumPy', 'compare', 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x*x))\n', '14.0'),
+        # mean requires compiling python.f90; sum alone is a Fortran intrinsic.
+        ('NumPy helpers', 'compare', 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x*x))\nprint(np.mean(x))\n', '14.0\n2.0'),
     ]
     for name, mode, source, expected in cases:
         identifier = request('jobs', {'source': source, 'mode': mode})['id']
