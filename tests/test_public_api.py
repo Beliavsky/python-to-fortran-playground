@@ -72,6 +72,34 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/jobs', content='x' * 650001, headers={**self.headers, 'Content-Type': 'application/json'}).status_code, 413)
         self.assertFalse(self.runner.jobs)
 
+    def test_compiler_allowlist_and_unavailable_intel_do_not_start_jobs(self):
+        self.assertEqual(self.client.get('/api/health').json()['compilers'], ['gfortran'])
+        for choice in ('gcc', 'ifx -O3', 'gfortran; echo bad', ['ifx'], None):
+            response = self.client.post('/api/jobs', json={'source': 'print(1)',
+                'mode': 'fortran', 'compiler': choice}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        response = self.client.post('/api/jobs', json={'source': 'print(1)',
+            'mode': 'fortran', 'compiler': 'ifx'}, headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('no automatic fallback', response.json()['error'])
+        self.assertFalse(self.runner.jobs)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+
+    def test_intel_choice_forwarded_when_enabled(self):
+        self.service.compilers = ('gfortran', 'ifx')
+        session = self.client.get('/api/session', headers=self.origin).json()
+        self.assertEqual(session['compilers'], ['gfortran', 'ifx'])
+        response = self.client.post('/api/jobs', json={'source': 'print(1)',
+            'mode': 'compare', 'compiler': 'ifx'}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'ifx')
+
+    def test_python_and_translation_work_without_intel(self):
+        for mode in ('python', 'translate'):
+            response = self.client.post('/api/jobs', json={'source': 'print(1)',
+                'mode': mode, 'compiler': 'ifx'}, headers=self.headers)
+            self.assertEqual(response.status_code, 202, response.text)
+
     def test_ownership_completion_and_cancellation(self):
         identifier = self.submit().json()['id']
         other = self.session()

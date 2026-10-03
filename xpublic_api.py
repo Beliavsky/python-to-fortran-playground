@@ -23,12 +23,14 @@ MAX_DAILY = 100
 MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
 MODES = {'translate', 'python', 'fortran', 'both', 'compare'}
+COMPILERS = {'gfortran', 'ifx'}
 
 
 class PublicService:
-    def __init__(self, store, runner, commit, clock=time.time):
+    def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',)):
         self.store, self.runner, self.commit, self.clock = store, runner, commit, clock
         self.lock = asyncio.Lock()
+        self.compilers = tuple(compilers)
 
     async def board(self):
         board = await self.store.get('board', None)
@@ -62,7 +64,8 @@ class PublicService:
             address_key = hmac.new(bytes.fromhex(board['secret']), address.encode(), hashlib.sha256).hexdigest()
             board['sessions'][key] = {'expires': self.clock() + 3600, 'address': address_key}
             await self.store.put('board', board)
-            return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran', 'hosted': True}
+            return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
+                    'compilers': list(self.compilers), 'hosted': True}
 
     async def reap(self, board):
         for identifier, job in board['jobs'].items():
@@ -82,6 +85,9 @@ class PublicService:
         async with self.lock:
             board = await self.board()
             owner, session = self.owner(board, token)
+            if (payload.get('mode') in {'fortran', 'both', 'compare'}
+                    and payload.get('compiler', 'gfortran') not in self.compilers):
+                raise HTTPException(503, 'Selected compiler is unavailable. Choose GNU Fortran; no automatic fallback was used.')
             await self.reap(board)
             if sum(job['state'] in {'running', 'starting'} for job in board['jobs'].values()) >= MAX_ACTIVE:
                 await self.store.put('board', board)
@@ -152,7 +158,8 @@ def create_api(service):
 
     @api.get('/api/health')
     async def health():
-        return {'ok': True, 'commit': service.commit, 'sandbox': 'gvisor', 'network': False}
+        return {'ok': True, 'commit': service.commit, 'sandbox': 'gvisor', 'network': False,
+                'compilers': list(service.compilers)}
 
     @api.get('/api/session')
     async def session(request: Request):
@@ -177,11 +184,15 @@ def create_api(service):
             if not isinstance(payload, dict):
                 raise ValueError()
             source, mode = payload.get('source'), payload.get('mode')
-            if not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE or not isinstance(mode, str) or mode not in MODES or not isinstance(payload.get('automatic', False), bool):
+            compiler = payload.get('compiler', 'gfortran')
+            if (not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE
+                    or not isinstance(mode, str) or mode not in MODES
+                    or not isinstance(payload.get('automatic', False), bool)
+                    or not isinstance(compiler, str) or compiler not in COMPILERS):
                 raise ValueError()
         except (ValueError, UnicodeError):
             raise HTTPException(400, 'Enter up to 100 KB of Python and a valid operation.')
-        return await service.submit(token, {key: payload[key] for key in ('source', 'mode', 'automatic') if key in payload})
+        return await service.submit(token, {key: payload[key] for key in ('source', 'mode', 'automatic', 'compiler') if key in payload})
 
     @api.get('/api/jobs/{identifier}')
     async def job(identifier: str, request: Request):

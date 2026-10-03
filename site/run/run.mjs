@@ -25,6 +25,7 @@ function buttons() {
   get('stop').disabled = !active || active.stopping;
   get('connect').disabled = connecting || Boolean(active);
   get('download').disabled = !downloading;
+  get('compiler').disabled = !token || Boolean(active);
 }
 async function api(path, method = 'GET', payload) {
   const response = await fetch(`${serviceURL}/api/${path}`, {
@@ -64,7 +65,11 @@ async function connect() {
     const manifest = await response.json();
     if (manifest.commit !== session.commit) throw new Error('Service and page use different transpiler revisions.');
     token = session.token; commit = session.commit;
-    get('connection').textContent = `Connected · p2f ${commit.slice(0, 7)} · ${session.compiler} · ${session.timeout} s run limit`;
+    const compilers = session.compilers || ['gfortran'];
+    get('compiler-intel').disabled = !compilers.includes('ifx');
+    get('compiler-intel').textContent = compilers.includes('ifx') ? 'Intel Fortran (experimental)' : 'Intel Fortran (unavailable)';
+    if (!compilers.includes(get('compiler').value)) get('compiler').value = 'gfortran';
+    get('connection').textContent = `Connected · p2f ${commit.slice(0, 7)} · ${compilers.join(' / ')} · ${session.timeout} s run limit`;
     get('status').textContent = 'Ready';
     if (get('live').checked) schedule();
   } catch (error) {
@@ -100,7 +105,8 @@ function show(result) {
   stage('build', 'diagnostics', 'build-time');
   if (result.error) get('diagnostics').textContent = result.error;
   const comparison = result.matches === undefined ? '' : result.matches ? ' · outputs match' : ' · outputs differ';
-  get('status').textContent = `${result.ok ? 'Completed' : 'Failed'}${comparison} · ${(result.seconds || 0).toFixed(2)} s total`;
+  const engine = result.execution || ['fortran', 'both', 'compare'].includes(result.mode) ? ` · ${result.compiler || 'gfortran'}` : '';
+  get('status').textContent = `${result.ok ? 'Completed' : 'Failed'}${comparison}${engine} · ${(result.seconds || 0).toFixed(2)} s total`;
   get('freshness').textContent = `Results for current input · p2f ${commit.slice(0, 7)}.${result.fortran ? '' : ' Generated Fortran was not updated.'} Program times include process startup; compilation is shown separately.`;
 }
 async function submit(mode, automatic = false) {
@@ -115,7 +121,7 @@ async function submit(mode, automatic = false) {
   get('freshness').textContent = 'Operation in progress; previous results are retained.';
   get('status').textContent = mode === 'translate' ? 'Translating…' : 'Running…';
   try {
-    const created = await api('jobs', 'POST', { source, mode, automatic });
+    const created = await api('jobs', 'POST', { source, mode, automatic, compiler: get('compiler').value || 'gfortran' });
     job.id = created.id;
     if (job.stopping) await api(`jobs/${job.id}/cancel`, 'POST', {});
     while (active === job) {
@@ -152,6 +158,10 @@ get('run-both').onclick = () => submit('both');
 get('compare').onclick = () => submit('compare');
 get('connect').onclick = connect;
 get('live').onchange = schedule;
+get('compiler').onchange = () => {
+  revision++;
+  get('freshness').textContent = 'Compiler changed; previous results are retained.';
+};
 get('stop').onclick = async () => {
   if (!active) return;
   active.stopping = true; pending = false;

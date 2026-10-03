@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 
@@ -76,6 +77,25 @@ class ExecutionTests(unittest.TestCase):
         self.assertFalse(xrun.compare_outputs("1 2", "1"))
         self.assertFalse(xrun.compare_outputs("hello", "goodbye"))
 
+    def test_compiler_selection_and_unavailable_intel(self):
+        self.assertEqual(xrun.compiler_command('gfortran'), xrun.DEFAULT_COMPILER)
+        with self.assertRaises(ValueError):
+            xrun.compiler_command('ifx -O3')
+        with patch('xrun.shutil.which', return_value=None), patch('xrun.run_command') as run:
+            result = xrun.execute(self.runtime, 'print(1)', 'fortran', threading.Event(), compiler_name='ifx')
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['compiler'], 'ifx')
+            self.assertIn('unavailable', result['error'])
+            run.assert_not_called()
+
+    @unittest.skipUnless(shutil.which('ifx') or shutil.which('p2f-ifx'), 'Intel compiler required')
+    def test_intel_compiles_helpers_and_matches_python(self):
+        source = 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.mean(x), np.std(x))\n'
+        result = xrun.execute(self.runtime, source, 'compare', threading.Event(), compiler_name='ifx')
+        self.assertTrue(result['ok'], result)
+        self.assertTrue(result['matches'])
+        self.assertEqual(result['compiler'], 'ifx')
+
     def test_http_requires_local_origin_and_token(self):
         server = xrun.ExecutionServer(("127.0.0.1", 0), self.runtime, self.manifest, "gfortran", 5)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -99,7 +119,8 @@ class ExecutionTests(unittest.TestCase):
                 request("/api/jobs", {"source": "print(1)", "mode": "python"}, {"Content-Type": "application/json"})
             self.assertEqual(error.exception.code, 403)
             headers = {"Content-Type": "application/json", "X-P2F-Token": session["token"]}
-            for payload in ([], {"source": "print(1)", "mode": []}, {"source": "x" * 100001, "mode": "python"}):
+            for payload in ([], {"source": "print(1)", "mode": []}, {"source": "x" * 100001, "mode": "python"},
+                            {"source": "print(1)", "mode": "fortran", "compiler": "ifx -O3"}):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     request("/api/jobs", payload, headers)
                 self.assertEqual(error.exception.code, 400)

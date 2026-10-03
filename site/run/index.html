@@ -34,6 +34,8 @@
     </section>
     <div class="toolbar">
       <button id="run-python" type="button" disabled>Run Python</button>
+      <label for="compiler">Fortran compiler</label>
+      <select id="compiler" disabled><option value="gfortran">GNU Fortran</option><option id="compiler-intel" value="ifx" disabled>Intel Fortran (experimental)</option></select>
       <button id="run-fortran" type="button" disabled>Run Fortran</button>
       <button id="run-both" class="primary" type="button" disabled>Run Both</button>
       <button id="compare" type="button" disabled>Compare outputs</button>
@@ -51,6 +53,7 @@
       <p id="editor-note">Loading syntax coloring…</p>
       <p>100 KB source limit · 200 KB per output stream · no interactive input · each run starts afresh.</p>
       <p>Comparison ignores whitespace and allows numerical differences within 1e-10 absolute or relative tolerance. Random draws can differ between Python and Fortran.</p>
+      <p>GNU is the default. Intel is optional; availability depends on the service. Compiler failures are reported without silently switching engines.</p>
       <p>Execution sends the source to the connected service. Hosted jobs run in isolated environments with no network access and fresh files for every operation. Local execution uses the permissions of the account running xrun.py.</p>
     </footer>
   </main>

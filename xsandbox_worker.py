@@ -26,7 +26,8 @@ def main():
     payload = json.loads(sys.stdin.readline(650_001))
     try:
         result = execute(Path('/opt/p2f/runtime'), payload['source'], payload['mode'],
-                         threading.Event(), timeout=30, automatic=payload.get('automatic', False))
+                         threading.Event(), timeout=30, automatic=payload.get('automatic', False),
+                         compiler_name=payload.get('compiler', 'gfortran'))
     except Exception as error:
         result = {'ok': False, 'error': str(error)}
     # Do not echo submitted source to the control plane or its logs.

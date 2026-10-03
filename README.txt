@@ -31,6 +31,12 @@ Program timings include process startup, and compilation is timed separately.
 The default compiler command is gfortran -ffree-line-length-none, applying
 to both generated code and bundled helpers that contain lines over 132 columns.
 For local --compiler overrides, include the appropriate flags for that compiler.
+The /run/ page also offers Intel Fortran (ifx, experimental) when the service
+advertises it. GNU remains the default; compiler choices are fixed server-side
+commands, not user-supplied command strings. Each result identifies its compiler.
+An unavailable Intel installation is reported without silently falling back;
+select GNU to retry. A real Intel compilation failure is retained as a failure.
+Python-only execution and translation do not require the selected compiler.
 
 This service is for TRUSTED LOCAL USE: programs run with your Windows account's
 permissions. It binds only to 127.0.0.1, checks Host and Origin, requires a
@@ -89,6 +95,7 @@ branches requiring a PR may reject this. It also honors github-pages environment
 approval rules. The existing service URL in site/run/service.json must be valid.
 Keep Modal usage budgets/spend limits set: image builds and checks cost compute,
 and each successful update uses three jobs from the public execution quota.
+When Intel is available, the checks also use three Intel jobs.
 
 Both deployment workflows share a concurrency lock. Normal pushes still run
 Test and deploy playground; pushes made by GITHUB_TOKEN do not trigger another
@@ -183,6 +190,33 @@ an immutable, content-named job image from the local checkout before deploying
 the API. The API only references that published image; it cannot upload local
 files from inside its runtime container. Running modal deploy directly does
 not build/publish a new job image.
+
+Intel support is a separate optional image. xdeploy_service.py first builds
+and publishes GNU, then attempts an Intel image with compiler package
+intel-oneapi-compiler-fortran-2025.3=2025.3.3-30 from Intel's signed APT repository.
+The image must pass translated arithmetic, NumPy mean/std (python.f90), and
+linear-solve (lapack_d.f90) comparisons before Intel is advertised. If installation
+or these checks fail, deployment reports a warning and continues with GNU only.
+Use --without-intel to explicitly skip Intel installation. GNU jobs always use
+the smaller GNU image; both engines keep the same isolation/resource limits.
+Intel's environment is initialized by a trusted wrapper, never by visitor input.
+Installation follows https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler-download.html
+and the software remains subject to Intel's applicable licence terms. No
+separate compiler account token is passed to submitted jobs. Building the
+optional image adds download/build time and Modal compute usage.
+
+The parent python.f90 must include the portability fix that declares the string
+argument before the result length in to_lower/to_upper. Older published pins
+(including 51cb68b) fail Intel's helper compilation. Publish that parent fix,
+select its commit with xupdate_upstream.py, and rebuild xvendor.py before
+deployment. Do not patch the vendored sources; browser and service use the same
+published bundle. This does not change the two functions' signatures or output.
+
+Local preview can use Intel already installed and initialized on PATH; it
+does not install Intel on your computer. For a strict hosted validation, run:
+  .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-intel
+Normal xcheck_service.py checks GNU and also Intel when advertised. The new
+selector is confined to /run/; the translation-only page remains unchanged.
 
 Deployment prints an HTTPS origin ending in .modal.run. Configure the page:
   python xconnect_service.py https://YOUR-DEPLOYED-SERVICE.modal.run

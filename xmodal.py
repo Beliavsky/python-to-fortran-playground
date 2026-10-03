@@ -20,13 +20,16 @@ def runtime_image_name():
         return os.environ['P2F_RUNTIME_IMAGE_NAME']
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
-    for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'upstream.json',
+    for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
+                     'xverify_intel.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
         digest.update((ROOT / filename).read_bytes())
     return 'p2f-runtime-' + digest.hexdigest()[:20]
 
 
 RUNTIME_IMAGE_NAME = runtime_image_name()
+INTEL_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-ifx'
+INTEL_ENABLED = os.environ.get('P2F_INTEL_ENABLED') == '1'
 
 job_image = (
     modal.Image.debian_slim(python_version='3.12')
@@ -45,10 +48,23 @@ job_image = (
     .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
 )
 
+# Separate optional image: GNU jobs do not pull Intel's toolchain.
+intel_installed_image = (
+    job_image
+    .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
+    .pip_install('certifi==2026.2.25')
+    .add_local_file(ROOT / 'xinstall_intel.sh', '/opt/p2f/xinstall_intel.sh', copy=True)
+    .add_local_file(ROOT / 'xverify_intel.py', '/opt/p2f/xverify_intel.py', copy=True)
+    .run_commands('bash /opt/p2f/xinstall_intel.sh')
+)
+intel_job_image = intel_installed_image.run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
+
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
     .pip_install('fastapi==0.142.2')
-    .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME})
+    .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME,
+          'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0'})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/manifest.json', copy=True)
 )
@@ -71,7 +87,9 @@ class Sandboxes:
             'python', '/opt/p2f/xsandbox_worker.py',
             # Runtime containers cannot upload files from the developer's
             # checkout. Resolve the image built and published before deploy.
-            app=app, image=modal.Image.from_name(RUNTIME_IMAGE_NAME), runtime='gvisor',
+            app=app, image=modal.Image.from_name(
+                INTEL_IMAGE_NAME if payload.get('compiler') == 'ifx'
+                and payload.get('mode') in {'fortran', 'both', 'compare'} else RUNTIME_IMAGE_NAME), runtime='gvisor',
             workdir='/work', block_network=True,
             cpu=(0.5, 1.0), memory=(512, 1024), timeout=250,
             secrets=[], volumes={}, include_oidc_identity_token=False,
@@ -119,4 +137,5 @@ class Sandboxes:
 def api():
     from xpublic_api import PublicService, create_api
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
-    return create_api(PublicService(Store(), Sandboxes(), manifest['commit']))
+    return create_api(PublicService(Store(), Sandboxes(), manifest['commit'],
+                                   compilers=('gfortran', 'ifx') if INTEL_ENABLED else ('gfortran',)))

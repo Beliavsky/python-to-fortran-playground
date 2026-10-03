@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -22,6 +24,25 @@ MAX_OUTPUT = 200_000
 MODES = {"translate", "python", "fortran", "both", "compare"}
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
+COMPILERS = {"gfortran", "ifx"}
+
+
+def compiler_command(name, default=DEFAULT_COMPILER):
+    """Map a browser choice to a trusted command, never accept browser flags."""
+    if name == "gfortran":
+        return default
+    if name == "ifx":
+        # Hosted wrapper initializes Intel's library/tool environment.
+        return "p2f-ifx" if shutil.which("p2f-ifx") else "ifx"
+    raise ValueError("Choose GNU Fortran or Intel Fortran.")
+
+
+def available_compilers(default=DEFAULT_COMPILER):
+    available = []
+    for name in ("gfortran", "ifx"):
+        if shutil.which(shlex.split(compiler_command(name, default))[0]):
+            available.append(name)
+    return available
 
 
 def unpack_runtime(destination):
@@ -126,9 +147,15 @@ def compare_outputs(left, right, tolerance=1e-10):
     return True
 
 
-def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False):
+def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
+            compiler_name="gfortran"):
     started = time.perf_counter()
-    result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0}
+    result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
+              "compiler": compiler_name}
+    command_text = compiler_command(compiler_name, compiler)
+    if mode in {"fortran", "both", "compare"} and not shutil.which(shlex.split(command_text)[0]):
+        return {**result, "error": f"{compiler_name} is unavailable in this execution environment. "
+                "Choose GNU Fortran or ask the service owner to install the selected compiler."}
     if automatic:
         try:
             if codeop.compile_command(source, symbol="exec") is None:
@@ -146,7 +173,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         if mode != "python":
             command = [sys.executable, str(runtime / "xp2f.py"), "input.py", "--flat", "--out", "input_p.f90"]
             if mode != "translate":
-                command += ["--compile", "--compiler", compiler]
+                command += ["--compile", "--compiler", command_text]
             result["build"] = run_command(command, ft, cancel, 180)
             output = ft / "input_p.f90"
             if output.exists():
@@ -194,7 +221,8 @@ class ExecutionServer(ThreadingHTTPServer):
         def work():
             try:
                 result = execute(self.runtime, payload["source"], payload["mode"], job.cancel,
-                                 self.compiler, self.timeout, payload.get("automatic", False))
+                                 self.compiler, self.timeout, payload.get("automatic", False),
+                                 compiler_name=payload.get("compiler", "gfortran"))
             except Exception as error:
                 result = {"ok": False, "error": str(error)}
             with self.lock:
@@ -235,7 +263,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/session":
             self.reply(200, {"token": self.server.token, "commit": self.server.manifest["commit"],
-                             "timeout": self.server.timeout, "compiler": self.server.compiler})
+                             "timeout": self.server.timeout, "compiler": self.server.compiler,
+                             "compilers": available_compilers(self.server.compiler)})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
                 return
@@ -266,7 +295,11 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if self.path == "/api/jobs":
             source, mode = payload.get("source"), payload.get("mode")
-            if not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE or not isinstance(mode, str) or mode not in MODES:
+            choice = payload.get("compiler", "gfortran")
+            if (not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE
+                    or not isinstance(mode, str) or mode not in MODES
+                    or not isinstance(choice, str) or choice not in COMPILERS
+                    or not isinstance(payload.get("automatic", False), bool)):
                 self.reply(400, {"error": "Enter up to 100 KB of Python and a valid operation."})
                 return
             identifier = self.server.submit(payload)
