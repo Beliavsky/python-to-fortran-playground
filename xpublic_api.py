@@ -23,7 +23,7 @@ MAX_DAILY = 100
 MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
 MODES = {'translate', 'python', 'fortran', 'both', 'compare'}
-COMPILERS = {'gfortran', 'ifx'}
+COMPILERS = {'gfortran', 'ifx', 'flang'}
 
 
 class PublicService:

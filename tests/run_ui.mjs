@@ -33,6 +33,7 @@ assert.equal(get('run-both').disabled, false);
 assert.match(get('connection').textContent, /123abcd/);
 assert.equal(get('compiler').value, 'gfortran');
 assert.equal(get('compiler-intel').disabled, true);
+assert.equal(get('compiler-flang').disabled, true);
 
 const result = { ok: true, mode: 'compare', seconds: 1.2, fortran: 'program input\nend program input\n', matches: true,
   build: { seconds: 0.8, stdout: 'Build: PASS', stderr: '' },
@@ -58,10 +59,20 @@ state = { state: 'done', result: { ...result, compiler: 'ifx' } };
 await get('compare').onclick();
 assert.equal(created.compiler, 'ifx');
 assert.match(get('status').textContent, /ifx/);
+compilers = ['gfortran', 'ifx', 'flang'];
+await get('connect').onclick();
+assert.equal(get('compiler-flang').disabled, false);
+get('compiler').value = 'flang';
+get('compiler').onchange();
+state = { state: 'done', result: { ...result, compiler: 'flang' } };
+await get('compare').onclick();
+assert.equal(created.compiler, 'flang');
+assert.match(get('status').textContent, /flang/);
 compilers = ['gfortran'];
 await get('connect').onclick();
 assert.equal(get('compiler').value, 'gfortran');
 assert.equal(get('compiler-intel').disabled, true);
+assert.equal(get('compiler-flang').disabled, true);
 
 state = { state: 'running' };
 const stale = get('run-both').onclick();

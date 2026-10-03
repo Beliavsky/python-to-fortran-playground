@@ -68,6 +68,8 @@ async function connect() {
     const compilers = session.compilers || ['gfortran'];
     get('compiler-intel').disabled = !compilers.includes('ifx');
     get('compiler-intel').textContent = compilers.includes('ifx') ? 'Intel Fortran (experimental)' : 'Intel Fortran (unavailable)';
+    get('compiler-flang').disabled = !compilers.includes('flang');
+    get('compiler-flang').textContent = compilers.includes('flang') ? 'LLVM Flang (experimental)' : 'LLVM Flang (unavailable)';
     if (!compilers.includes(get('compiler').value)) get('compiler').value = 'gfortran';
     get('connection').textContent = `Connected · p2f ${commit.slice(0, 7)} · ${compilers.join(' / ')} · ${session.timeout} s run limit`;
     get('status').textContent = 'Ready';

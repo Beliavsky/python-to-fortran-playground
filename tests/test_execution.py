@@ -89,6 +89,28 @@ class ExecutionTests(unittest.TestCase):
             self.assertIn('unavailable', result['error'])
             run.assert_not_called()
 
+    def test_flang_selection_and_unavailable_compiler(self):
+        with patch('xrun.shutil.which', side_effect=lambda name: name if name == 'flang-21' else None):
+            self.assertEqual(xrun.compiler_command('flang'), 'flang-21')
+            self.assertEqual(xrun.available_compilers(), ['flang'])
+        with patch('xrun.shutil.which', side_effect=lambda name: name if name == 'flang' else None):
+            self.assertEqual(xrun.compiler_command('flang'), 'flang')
+        with patch('xrun.shutil.which', return_value=None), patch('xrun.run_command') as run:
+            result = xrun.execute(self.runtime, 'print(1)', 'fortran', threading.Event(), compiler_name='flang')
+            self.assertFalse(result['ok'])
+            self.assertIn('unavailable', result['error'])
+            run.assert_not_called()
+
+    @unittest.skipUnless(any(shutil.which(exe) for exe in ('flang-21', 'flang', 'flang-new')),
+                         'LLVM Flang compiler required')
+    def test_flang_precompiled_helpers_and_translations(self):
+        from xverify_flang import verify
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            xrun.unpack_runtime(runtime)
+            precompile(runtime, 'flang')
+            verify(runtime)
+
     def test_helper_cache_rejects_incompatible_or_damaged_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory)

@@ -31,11 +31,12 @@ Program timings include process startup, and compilation is timed separately.
 The default compiler command is gfortran -ffree-line-length-none, applying
 to both generated code and bundled helpers that contain lines over 132 columns.
 For local --compiler overrides, include the appropriate flags for that compiler.
-The /run/ page also offers Intel Fortran (ifx, experimental) when the service
-advertises it. GNU remains the default; compiler choices are fixed server-side
+The /run/ page also offers Intel Fortran (ifx, experimental) and LLVM Flang
+(experimental) when the service advertises them. GNU remains the default;
+compiler choices are fixed server-side
 commands, not user-supplied command strings. Each result identifies its compiler.
-An unavailable Intel installation is reported without silently falling back;
-select GNU to retry. A real Intel compilation failure is retained as a failure.
+An unavailable compiler is reported without silently falling back; select GNU
+to retry. A real compilation failure is retained as a failure.
 Python-only execution and translation do not require the selected compiler.
 
 This service is for TRUSTED LOCAL USE: programs run with your Windows account's
@@ -95,7 +96,7 @@ branches requiring a PR may reject this. It also honors github-pages environment
 approval rules. The existing service URL in site/run/service.json must be valid.
 Keep Modal usage budgets/spend limits set: image builds and checks cost compute,
 and each successful update uses three jobs from the public execution quota.
-When Intel is available, the checks also use three Intel jobs.
+Each advertised Intel/LLVM Flang compiler adds three validation jobs.
 
 Both deployment workflows share a concurrency lock. Normal pushes still run
 Test and deploy playground; pushes made by GITHUB_TOKEN do not trigger another
@@ -196,17 +197,18 @@ and publishes GNU, then attempts an Intel image with compiler package
 intel-oneapi-compiler-fortran-2025.3=2025.3.3-30 from Intel's signed APT repository.
 The image must pass translated arithmetic, NumPy mean/std (python.f90), and
 linear-solve (lapack_d.f90) comparisons before Intel is advertised. If installation
-or these checks fail, deployment reports a warning and continues with GNU only.
+or these checks fail, deployment reports a warning and leaves GNU and Flang
+unaffected.
 Use --without-intel to explicitly skip Intel installation. GNU jobs always use
-the smaller GNU image; both engines keep the same isolation/resource limits.
+the smaller GNU image; all engines keep the same isolation/resource limits.
 Intel's environment is initialized by a trusted wrapper, never by visitor input.
 Installation follows https://www.intel.com/content/www/us/en/developer/tools/oneapi/fortran-compiler-download.html
 and the software remains subject to Intel's applicable licence terms. No
 separate compiler account token is passed to submitted jobs. Building the
 optional image adds download/build time and Modal compute usage.
 
-Both images precompile python.f90 and lapack_d.f90 once, separately for GNU
-and Intel with the same options used by execution jobs. Each job copies the
+All compiler images precompile python.f90 and lapack_d.f90 once, separately
+with the same options used by execution jobs. Each job copies the
 object/module files into its own temporary directory; writable caches are
 never shared between visitors. Source hashes, compiler version/options, and
 artifact checksums must match before reuse. Missing or incompatible caches
@@ -215,6 +217,22 @@ selects a new runtime image and rebuilds the helpers. This reduces repeated
 compilation time and Modal compute usage, not the number of jobs charged
 against the service's daily allowance. Local preview without an image cache
 continues to compile normally.
+
+LLVM Flang has its own optional image, independent of Intel. It uses the
+signed https://apt.llvm.org/bookworm/ LLVM 21 repository and pins flang-21 to
+1:21.1.8~++20251221032947+2078da43e25a-1~exp1~20251221153113.67 (LLVM 21.1.8).
+Neither the upstream transpiler nor helper sources are modified. The image
+must compile both helpers and pass arithmetic, mean/std, LAPACK solve,
+formatting, and random-number execution checks using its own precompiled
+objects/modules before Flang is advertised. A failed Flang image does not
+disable GNU or Intel. Use --without-flang to skip it; use both --without-intel
+and --without-flang for a GNU-only deployment. These optional images add
+build time and Modal usage. Visitors cannot supply arbitrary compiler flags.
+Local preview detects flang-21, flang, or flang-new on PATH (LLVM Flang only).
+To require Flang in hosted validation:
+  .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-flang
+Validation uses three GNU jobs plus three jobs for each advertised optional
+compiler (nine jobs when all three compilers are available).
 
 The parent python.f90 must include the portability fix that declares the string
 argument before the result length in to_lower/to_upper. Older published pins
@@ -226,7 +244,7 @@ published bundle. This does not change the two functions' signatures or output.
 Local preview can use Intel already installed and initialized on PATH; it
 does not install Intel on your computer. For a strict hosted validation, run:
   .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-intel
-Normal xcheck_service.py checks GNU and also Intel when advertised. The new
+Normal xcheck_service.py checks GNU and advertised Intel/Flang compilers. The
 selector is confined to /run/; the translation-only page remains unchanged.
 
 Deployment prints an HTTPS origin ending in .modal.run. Configure the page:

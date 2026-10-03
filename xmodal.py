@@ -21,7 +21,8 @@ def runtime_image_name():
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
     for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
-                     'xverify_intel.py', 'xprecompile.py', 'upstream.json',
+                     'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
+                     'xverify_flang.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
         digest.update((ROOT / filename).read_bytes())
     return 'p2f-runtime-' + digest.hexdigest()[:20]
@@ -30,6 +31,8 @@ def runtime_image_name():
 RUNTIME_IMAGE_NAME = runtime_image_name()
 INTEL_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-ifx'
 INTEL_ENABLED = os.environ.get('P2F_INTEL_ENABLED') == '1'
+FLANG_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-flang'
+FLANG_ENABLED = os.environ.get('P2F_FLANG_ENABLED') == '1'
 
 job_image = (
     modal.Image.debian_slim(python_version='3.12')
@@ -63,11 +66,25 @@ intel_job_image = intel_installed_image.run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py ifx',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
 
+# Independent optional image; no Intel installation or cross-compiler modules.
+flang_installed_image = (
+    job_image
+    .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
+    .pip_install('certifi==2026.2.25')
+    .add_local_file(ROOT / 'xinstall_flang.sh', '/opt/p2f/xinstall_flang.sh', copy=True)
+    .add_local_file(ROOT / 'xverify_flang.py', '/opt/p2f/xverify_flang.py', copy=True)
+    .run_commands('bash /opt/p2f/xinstall_flang.sh')
+)
+flang_job_image = flang_installed_image.run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
+
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
     .pip_install('fastapi==0.142.2')
     .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME,
-          'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0'})
+          'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0',
+          'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0'})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/manifest.json', copy=True)
 )
@@ -86,13 +103,15 @@ class Store:
 
 class Sandboxes:
     async def start(self, payload):
+        image_name = RUNTIME_IMAGE_NAME
+        if payload.get('mode') in {'fortran', 'both', 'compare'}:
+            image_name = {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME}.get(
+                payload.get('compiler'), RUNTIME_IMAGE_NAME)
         sandbox = await modal.Sandbox.create.aio(
             'python', '/opt/p2f/xsandbox_worker.py',
             # Runtime containers cannot upload files from the developer's
             # checkout. Resolve the image built and published before deploy.
-            app=app, image=modal.Image.from_name(
-                INTEL_IMAGE_NAME if payload.get('compiler') == 'ifx'
-                and payload.get('mode') in {'fortran', 'both', 'compare'} else RUNTIME_IMAGE_NAME), runtime='gvisor',
+            app=app, image=modal.Image.from_name(image_name), runtime='gvisor',
             workdir='/work', block_network=True,
             cpu=(0.5, 1.0), memory=(512, 1024), timeout=250,
             secrets=[], volumes={}, include_oidc_identity_token=False,
@@ -141,4 +160,5 @@ def api():
     from xpublic_api import PublicService, create_api
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
     return create_api(PublicService(Store(), Sandboxes(), manifest['commit'],
-                                   compilers=('gfortran', 'ifx') if INTEL_ENABLED else ('gfortran',)))
+                                   compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
+                                   + (('flang',) if FLANG_ENABLED else ())))

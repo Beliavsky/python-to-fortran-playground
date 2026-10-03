@@ -24,7 +24,7 @@ MAX_OUTPUT = 200_000
 MODES = {"translate", "python", "fortran", "both", "compare"}
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
-COMPILERS = {"gfortran", "ifx"}
+COMPILERS = {"gfortran", "ifx", "flang"}
 
 
 def helper_identity(runtime, command):
@@ -70,12 +70,15 @@ def compiler_command(name, default=DEFAULT_COMPILER):
     if name == "ifx":
         # Hosted wrapper initializes Intel's library/tool environment.
         return "p2f-ifx" if shutil.which("p2f-ifx") else "ifx"
-    raise ValueError("Choose GNU Fortran or Intel Fortran.")
+    if name == "flang":
+        # Hosted image pins LLVM 21; allow normal local LLVM installations too.
+        return next((exe for exe in ('flang-21', 'flang', 'flang-new') if shutil.which(exe)), 'flang-21')
+    raise ValueError("Choose GNU Fortran, Intel Fortran, or LLVM Flang.")
 
 
 def available_compilers(default=DEFAULT_COMPILER):
     available = []
-    for name in ("gfortran", "ifx"):
+    for name in ("gfortran", "ifx", "flang"):
         if shutil.which(shlex.split(compiler_command(name, default))[0]):
             available.append(name)
     return available
