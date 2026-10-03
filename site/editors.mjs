@@ -59,10 +59,10 @@ export function createEditor(textarea, counter, onChange = () => {}) {
   return api;
 }
 
-export async function enableColoring(python, fortran) {
+export async function enableColoring(python, fortran, fortranLabel = 'Generated Fortran (read only)') {
   await import('./editor-vendor/codemirror.js');
   await import('./editor-vendor/python.js');
   await import('./editor-vendor/fortran.js');
   python.enhance(globalThis.CodeMirror, { name: 'python', version: 3 }, 'Python input');
-  fortran.enhance(globalThis.CodeMirror, 'text/x-fortran', 'Generated Fortran (read only)');
+  fortran.enhance(globalThis.CodeMirror, 'text/x-fortran', fortranLabel);
 }

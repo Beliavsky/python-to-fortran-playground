@@ -31,8 +31,8 @@ Program timings include process startup, and compilation is timed separately.
 The default compiler command is gfortran -ffree-line-length-none, applying
 to both generated code and bundled helpers that contain lines over 132 columns.
 For local --compiler overrides, include the appropriate flags for that compiler.
-The /run/ page also offers Intel Fortran (ifx, experimental) and LLVM Flang
-(experimental) when the service advertises them. GNU remains the default;
+The /run/ page also offers Intel Fortran (ifx), LLVM Flang, and LFortran
+(all experimental) when the service advertises them. GNU remains the default;
 compiler choices are fixed server-side
 commands, not user-supplied command strings. Each result identifies its compiler.
 An unavailable compiler is reported without silently falling back; select GNU
@@ -96,7 +96,7 @@ branches requiring a PR may reject this. It also honors github-pages environment
 approval rules. The existing service URL in site/run/service.json must be valid.
 Keep Modal usage budgets/spend limits set: image builds and checks cost compute,
 and each successful update uses three jobs from the public execution quota.
-Each advertised Intel/LLVM Flang compiler adds three validation jobs.
+Each advertised Intel/LLVM Flang/LFortran compiler adds three validation jobs.
 
 Both deployment workflows share a concurrency lock. Normal pushes still run
 Test and deploy playground; pushes made by GITHUB_TOKEN do not trigger another
@@ -226,13 +226,36 @@ must compile both helpers and pass arithmetic, mean/std, LAPACK solve,
 formatting, and random-number execution checks using its own precompiled
 objects/modules before Flang is advertised. A failed Flang image does not
 disable GNU or Intel. Use --without-flang to skip it; use both --without-intel
-and --without-flang for a GNU-only deployment. These optional images add
+and --without-flang and --without-lfortran for a GNU-only deployment. These optional images add
 build time and Modal usage. Visitors cannot supply arbitrary compiler flags.
 Local preview detects flang-21, flang, or flang-new on PATH (LLVM Flang only).
 To require Flang in hosted validation:
   .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-flang
 Validation uses three GNU jobs plus three jobs for each advertised optional
-compiler (nine jobs when all three compilers are available).
+compiler (twelve jobs when all four compilers are available).
+
+LFortran uses an independent Conda image with conda-forge's Linux package
+lfortran=0.66.0=hd7e4fe6_4, installed using Modal's micromamba support.
+It is alpha software, not a promise that every translated program works.
+Both helper sources are unchanged. Its fixed server-side compiler options are:
+  lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections
+The first two options bound noisy diagnostics; --implicit-interface and
+--legacy-array-sections support legacy LAPACK calls and sequence association.
+--separate-compilation is essential: otherwise compiling python.f90 produces
+a module file and a stub object, not the helper implementations needed to link.
+The image precompiles both helpers and must pass the same arithmetic, NumPy,
+LAPACK, formatting, and random-number execution checks as Flang. A failed image
+is not advertised and does not disable the other compilers. Use
+--without-lfortran to skip it. To require it during hosted validation:
+  .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-lfortran
+See https://docs.lfortran.org/en/installation/ for the recommended Conda setup.
+Windows local execution additionally requires the initialized Visual Studio
+compiler/linker environment; an unrelated GNU link.exe on PATH is not MSVC's
+linker. The hosted Linux image does not require visitors to install these tools.
+The reproducible test-only probe saves source hashes and compiler diagnostics:
+  .venv-execution\Scripts\python.exe -X utf8 xprobe_lfortran.py --modal --out lfortran_results.json
+This builds a test image and uses Modal compute; it does not publish an image
+or deploy/change the live service. Local probing accepts --runtime PATH instead.
 
 The parent python.f90 must include the portability fix that declares the string
 argument before the result length in to_lower/to_upper. Older published pins
@@ -244,7 +267,7 @@ published bundle. This does not change the two functions' signatures or output.
 Local preview can use Intel already installed and initialized on PATH; it
 does not install Intel on your computer. For a strict hosted validation, run:
   .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-intel
-Normal xcheck_service.py checks GNU and advertised Intel/Flang compilers. The
+Normal xcheck_service.py checks GNU and all advertised optional compilers. The
 selector is confined to /run/; the translation-only page remains unchanged.
 
 Deployment prints an HTTPS origin ending in .modal.run. Configure the page:
@@ -330,10 +353,39 @@ The Python editor supports four-space Tab indentation, line numbers, and
 Ctrl+Z (Cmd+Z on macOS). Clear is one undoable edit in the enhanced editor;
 it also clears the translation and diagnostics and focuses Python input.
 It does not restart the worker and remains available during a translation.
-The Fortran editor remains read-only, with text selection and copying allowed.
+The translation-only site's Fortran editor remains read-only. On /run/,
+the optional Edit Fortran mode enables editing and standalone compilation.
 Esc blurs the editor so keyboard users can move to the next control.
 Both headings count physical lines including comments and blank lines; one
 terminal newline does not add an extra line, and empty text has zero lines.
+
+Edit Fortran on /run/
+--------------------
+Enable Edit Fortran to modify a translation or enter an unrelated single-file
+Fortran main program. Compile and Run Fortran uses that buffer unchanged,
+without translating Python. Python input may be empty for this operation.
+Run Both and Compare outputs execute Python and the edited Fortran, using
+separate fresh working directories. Compiler selection applies as usual.
+
+Live translation pauses while editing Fortran. Python edits and Clear do not
+discard manual Fortran. Translate asks before replacing manual edits, and
+Restore last translation asks before discarding edits. Turning edit mode off
+does not discard changes. Results from older buffers cannot overwrite edits.
+Download Fortran saves the current pane, including manual changes.
+
+Programs using python_mod automatically link python.o and lapack_d.o, using
+the selected compiler's verified precompiled cache when available. No helper
+source is changed and no additional libraries (such as stdlib) are provided.
+Declare your own real64/dp kinds as needed; normal Fortran USE rules apply.
+Standalone code without python_mod does not link the helpers. Each language
+has its own 100 KB source limit. All existing execution limits and sandbox
+isolation remain in force; editing never automatically executes code.
+
+After publishing the page, redeploy the execution service with
+  .venv-execution\Scripts\python.exe xdeploy_service.py
+The old service does not accept the new edit operations. Local previews use
+the updated xrun.py immediately after restarting it. Check direct compilation:
+  python -m unittest discover -s tests -p test_fortran_edit.py
 
 Persistent-worker validation, 2026-10-02
 --------------------------------------

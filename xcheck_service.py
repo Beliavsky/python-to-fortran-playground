@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--require-intel', action='store_true', help='Fail unless Intel is advertised and passes')
     parser.add_argument('--require-flang', action='store_true', help='Fail unless LLVM Flang is advertised and passes')
+    parser.add_argument('--require-lfortran', action='store_true', help='Fail unless LFortran is advertised and passes')
     args = parser.parse_args()
     url = json.loads((ROOT / 'site/run/service.json').read_text())['url']
     token = ''
@@ -37,10 +38,13 @@ def main():
         raise RuntimeError('Hosted service does not match upstream.json')
     intel = 'ifx' in session.get('compilers', ['gfortran'])
     flang = 'flang' in session.get('compilers', ['gfortran'])
+    lfortran = 'lfortran' in session.get('compilers', ['gfortran'])
     if args.require_intel and not intel:
         raise RuntimeError('Intel is unavailable; deploy an Intel-verified image first')
     if args.require_flang and not flang:
         raise RuntimeError('LLVM Flang is unavailable; deploy a Flang-verified image first')
+    if args.require_lfortran and not lfortran:
+        raise RuntimeError('LFortran is unavailable; deploy an LFortran-verified image first')
     cases = [
         ('unprivileged Python', 'python', 'import os\nprint(os.geteuid())\n', '65534'),
         ('sum of squares', 'compare', 'total = 0\nfor i in range(1, 11):\n    total += i*i\nprint(total)\n', '385'),
@@ -48,7 +52,8 @@ def main():
         ('NumPy helpers', 'compare', 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x*x))\nprint(np.mean(x))\n', '14.0\n2.0'),
     ]
     cases = [(name, mode, source, expected, 'gfortran') for name, mode, source, expected in cases]
-    for enabled, label, compiler in ((intel, 'Intel', 'ifx'), (flang, 'LLVM Flang', 'flang')):
+    for enabled, label, compiler in ((intel, 'Intel', 'ifx'), (flang, 'LLVM Flang', 'flang'),
+                                    (lfortran, 'LFortran', 'lfortran')):
         if enabled:
             cases += [
                 (f'{label} sum of squares', 'compare', 'total = 0\nfor i in range(1, 11):\n    total += i*i\nprint(total)\n', '385', compiler),

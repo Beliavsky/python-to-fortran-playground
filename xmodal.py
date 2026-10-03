@@ -20,7 +20,7 @@ def runtime_image_name():
         return os.environ['P2F_RUNTIME_IMAGE_NAME']
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
-    for filename in ('xmodal.py', 'xrun.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
+    for filename in ('xmodal.py', 'xrun.py', 'xcompile_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
                      'xverify_flang.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
@@ -33,12 +33,15 @@ INTEL_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-ifx'
 INTEL_ENABLED = os.environ.get('P2F_INTEL_ENABLED') == '1'
 FLANG_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-flang'
 FLANG_ENABLED = os.environ.get('P2F_FLANG_ENABLED') == '1'
+LFORTRAN_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-lfortran'
+LFORTRAN_ENABLED = os.environ.get('P2F_LFORTRAN_ENABLED') == '1'
 
 job_image = (
     modal.Image.debian_slim(python_version='3.12')
     .apt_install('gfortran')
     .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
     .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
     .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
     .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
     .add_local_file(ROOT / 'upstream.json', '/opt/p2f/upstream.json', copy=True)
@@ -79,12 +82,37 @@ flang_job_image = flang_installed_image.run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
 
+# Conda is LFortran's recommended binary installation. Keep its libraries
+# independent of GNU/Intel/Flang and use exactly the compiler tested by the probe.
+lfortran_installed_image = (
+    modal.Image.micromamba(python_version='3.12')
+    .micromamba_install('lfortran=0.66.0=hd7e4fe6_4', channels=['conda-forge'])
+    .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
+    .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
+    .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
+    .add_local_file(ROOT / 'xverify_flang.py', '/opt/p2f/xverify_flang.py', copy=True)
+    .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
+    .add_local_file(ROOT / 'upstream.json', '/opt/p2f/upstream.json', copy=True)
+    .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/site/vendor/manifest.json', copy=True)
+    .add_local_file(ROOT / 'site/vendor/upstream.zip', '/opt/p2f/site/vendor/upstream.zip', copy=True)
+    .run_commands(
+        'mkdir -p /opt/p2f/runtime /work',
+        "PYTHONPATH=/opt/p2f python -c \"from pathlib import Path; from xrun import unpack_runtime; unpack_runtime(Path('/opt/p2f/runtime'))\"",
+        'chmod 1777 /work')
+    .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
+)
+lfortran_job_image = lfortran_installed_image.run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py lfortran',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py --compiler lfortran')
+
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
     .pip_install('fastapi==0.142.2')
     .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME,
           'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0',
-          'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0'})
+          'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0',
+          'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0'})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/manifest.json', copy=True)
 )
@@ -104,8 +132,9 @@ class Store:
 class Sandboxes:
     async def start(self, payload):
         image_name = RUNTIME_IMAGE_NAME
-        if payload.get('mode') in {'fortran', 'both', 'compare'}:
-            image_name = {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME}.get(
+        if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit'}:
+            image_name = {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
+                          'lfortran': LFORTRAN_IMAGE_NAME}.get(
                 payload.get('compiler'), RUNTIME_IMAGE_NAME)
         sandbox = await modal.Sandbox.create.aio(
             'python', '/opt/p2f/xsandbox_worker.py',
@@ -161,4 +190,5 @@ def api():
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
     return create_api(PublicService(Store(), Sandboxes(), manifest['commit'],
                                    compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
-                                   + (('flang',) if FLANG_ENABLED else ())))
+                                   + (('flang',) if FLANG_ENABLED else ())
+                                   + (('lfortran',) if LFORTRAN_ENABLED else ())))

@@ -23,11 +23,12 @@ def main():
     resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024,) * 2)
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
-    payload = json.loads(sys.stdin.readline(650_001))
+    payload = json.loads(sys.stdin.readline(1_300_001))
     try:
         result = execute(Path('/opt/p2f/runtime'), payload['source'], payload['mode'],
                          threading.Event(), timeout=30, automatic=payload.get('automatic', False),
-                         compiler_name=payload.get('compiler', 'gfortran'))
+                         compiler_name=payload.get('compiler', 'gfortran'),
+                         fortran_source=payload.get('fortran_source'))
     except Exception as error:
         result = {'ok': False, 'error': str(error)}
     # Do not echo submitted source to the control plane or its logs.

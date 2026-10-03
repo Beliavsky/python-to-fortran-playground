@@ -21,10 +21,14 @@ import zipfile
 ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
 MAX_OUTPUT = 200_000
-MODES = {"translate", "python", "fortran", "both", "compare"}
+EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit'}
+COMPILE_MODES = {'fortran', 'both', 'compare'} | EDIT_MODES
+MODES = {"translate", "python", "fortran", "both", "compare"} | EDIT_MODES
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
-COMPILERS = {"gfortran", "ifx", "flang"}
+DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
+                    '--separate-compilation --legacy-array-sections')
+COMPILERS = {"gfortran", "ifx", "flang", "lfortran"}
 
 
 def helper_identity(runtime, command):
@@ -73,12 +77,14 @@ def compiler_command(name, default=DEFAULT_COMPILER):
     if name == "flang":
         # Hosted image pins LLVM 21; allow normal local LLVM installations too.
         return next((exe for exe in ('flang-21', 'flang', 'flang-new') if shutil.which(exe)), 'flang-21')
-    raise ValueError("Choose GNU Fortran, Intel Fortran, or LLVM Flang.")
+    if name == "lfortran":
+        return DEFAULT_LFORTRAN
+    raise ValueError("Choose GNU Fortran, Intel Fortran, LLVM Flang, or LFortran.")
 
 
 def available_compilers(default=DEFAULT_COMPILER):
     available = []
-    for name in ("gfortran", "ifx", "flang"):
+    for name in ("gfortran", "ifx", "flang", "lfortran"):
         if shutil.which(shlex.split(compiler_command(name, default))[0]):
             available.append(name)
     return available
@@ -187,15 +193,17 @@ def compare_outputs(left, right, tolerance=1e-10):
 
 
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
-            compiler_name="gfortran"):
+            compiler_name="gfortran", fortran_source=None):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
     command_text = compiler_command(compiler_name, compiler)
-    if mode in {"fortran", "both", "compare"} and not shutil.which(shlex.split(command_text)[0]):
+    if mode in COMPILE_MODES and not shutil.which(shlex.split(command_text)[0]):
         return {**result, "error": f"{compiler_name} is unavailable in this execution environment. "
                 "Choose GNU Fortran or ask the service owner to install the selected compiler."}
-    if automatic:
+    if mode in EDIT_MODES and (not isinstance(fortran_source, str) or not fortran_source.strip()):
+        return {**result, 'error': 'Enter Fortran code to compile.'}
+    if automatic and mode not in EDIT_MODES:
         try:
             if codeop.compile_command(source, symbol="exec") is None:
                 return {**result, "syntaxStatus": "incomplete"}
@@ -209,7 +217,14 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         py.mkdir()
         (ft / "input.py").write_text(source, encoding="utf-8")
         (py / "input.py").write_text(source, encoding="utf-8")
-        if mode != "python":
+        if mode in EDIT_MODES:
+            (ft / 'input_p.f90').write_text(fortran_source, encoding='utf-8')
+            result['fortran'] = fortran_source
+            result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
+            command = [sys.executable, str(ROOT / 'xcompile_fortran.py'), '--runtime', str(runtime),
+                       '--compiler', command_text]
+            result['build'] = run_command(command, ft, cancel, 180)
+        elif mode != "python":
             command = [sys.executable, str(runtime / "xp2f.py"), "input.py", "--flat", "--out", "input_p.f90"]
             if mode != "translate":
                 result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
@@ -218,15 +233,15 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             output = ft / "input_p.f90"
             if output.exists():
                 result["fortran"] = output.read_text(encoding="utf-8")
-        if mode in {"python", "both", "compare"}:
+        if mode in {"python", "both", "compare", 'both-edit', 'compare-edit'}:
             result["python"] = run_command([sys.executable, "input.py"], py, cancel, timeout)
-        if mode in {"fortran", "both", "compare"} and result["build"]["ok"]:
+        if mode in COMPILE_MODES and result["build"]["ok"]:
             # The pinned upstream CLI uses .exe on every platform.
             exe = ft / "input_p.exe"
             result["execution"] = run_command([str(exe)], ft, cancel, timeout)
         stages = [result[key]["ok"] for key in ("build", "python", "execution") if key in result]
         result["ok"] = bool(stages) and all(stages) and not cancel.is_set()
-        if mode == "compare" and result["ok"]:
+        if mode in {'compare', 'compare-edit'} and result["ok"]:
             result["matches"] = compare_outputs(result["python"]["stdout"], result["execution"]["stdout"])
             result["ok"] = result["matches"]
     result["seconds"] = time.perf_counter() - started
@@ -262,7 +277,8 @@ class ExecutionServer(ThreadingHTTPServer):
             try:
                 result = execute(self.runtime, payload["source"], payload["mode"], job.cancel,
                                  self.compiler, self.timeout, payload.get("automatic", False),
-                                 compiler_name=payload.get("compiler", "gfortran"))
+                                 compiler_name=payload.get("compiler", "gfortran"),
+                                 fortran_source=payload.get('fortran_source'))
             except Exception as error:
                 result = {"ok": False, "error": str(error)}
             with self.lock:
@@ -325,7 +341,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 650_000:
+            if not 0 < length <= 1_300_000:
                 raise ValueError("Request exceeds the input limit")
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
@@ -334,14 +350,22 @@ class Handler(SimpleHTTPRequestHandler):
             self.reply(400, {"error": str(error)})
             return
         if self.path == "/api/jobs":
-            source, mode = payload.get("source"), payload.get("mode")
+            source, mode = payload.get("source", ''), payload.get("mode")
             choice = payload.get("compiler", "gfortran")
-            if (not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE
+            ft_source = payload.get('fortran_source')
+            try:
+                valid_source = isinstance(source, str) and len(source.encode()) <= MAX_SOURCE
+                valid_ft = isinstance(ft_source, str) and bool(ft_source.strip()) and len(ft_source.encode()) <= MAX_SOURCE
+            except UnicodeError:
+                valid_source = valid_ft = False
+            if (not valid_source or (not source.strip() and mode != 'fortran-edit')
                     or not isinstance(mode, str) or mode not in MODES
+                    or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
                     or not isinstance(choice, str) or choice not in COMPILERS
                     or not isinstance(payload.get("automatic", False), bool)):
-                self.reply(400, {"error": "Enter up to 100 KB of Python and a valid operation."})
+                self.reply(400, {"error": "Enter valid source (up to 100 KB per language) and a valid operation."})
                 return
+            payload['source'] = source
             identifier = self.server.submit(payload)
             self.reply(202 if identifier else 429, {"id": identifier} if identifier else {"error": "Two jobs are already active; stop one or wait."})
         elif self.path.startswith("/api/jobs/") and self.path.endswith("/cancel"):

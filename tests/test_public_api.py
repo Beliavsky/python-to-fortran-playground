@@ -69,16 +69,16 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/jobs', json={'source': 'x', 'mode': 'python'}, headers=self.origin).status_code, 403)
         for payload in ([], {'source': 'x', 'mode': []}, {'source': '\ud800', 'mode': 'python'}, {'source': 'x' * 100001, 'mode': 'python'}, {'source': 'x', 'mode': 'python', 'automatic': 'yes'}):
             self.assertEqual(self.client.post('/api/jobs', content=json.dumps(payload), headers={**self.headers, 'Content-Type': 'application/json'}).status_code, 400)
-        self.assertEqual(self.client.post('/api/jobs', content='x' * 650001, headers={**self.headers, 'Content-Type': 'application/json'}).status_code, 413)
+        self.assertEqual(self.client.post('/api/jobs', content='x' * (public.MAX_REQUEST + 1), headers={**self.headers, 'Content-Type': 'application/json'}).status_code, 413)
         self.assertFalse(self.runner.jobs)
 
     def test_compiler_allowlist_and_unavailable_intel_do_not_start_jobs(self):
         self.assertEqual(self.client.get('/api/health').json()['compilers'], ['gfortran'])
-        for choice in ('gcc', 'ifx -O3', 'flang -O3', 'gfortran; echo bad', ['ifx'], None):
+        for choice in ('gcc', 'ifx -O3', 'flang -O3', 'lfortran --fast', 'gfortran; echo bad', ['ifx'], None):
             response = self.client.post('/api/jobs', json={'source': 'print(1)',
                 'mode': 'fortran', 'compiler': choice}, headers=self.headers)
             self.assertEqual(response.status_code, 400, response.text)
-        for choice in ('ifx', 'flang'):
+        for choice in ('ifx', 'flang', 'lfortran'):
             response = self.client.post('/api/jobs', json={'source': 'print(1)',
                 'mode': 'fortran', 'compiler': choice}, headers=self.headers)
             self.assertEqual(response.status_code, 503)
@@ -95,6 +95,32 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'ifx')
 
+    def test_edited_fortran_validation_and_forwarding(self):
+        ft = 'program demo\nprint *, 42\nend program demo\n'
+        invalid = [
+            {'mode': 'fortran-edit'},
+            {'mode': 'compare-edit', 'fortran_source': ft},
+            {'mode': 'fortran-edit', 'fortran_source': ft, 'automatic': True},
+            {'mode': 'fortran-edit', 'fortran_source': 'x' * 100001},
+            {'mode': 'fortran-edit', 'fortran_source': '\ud800'},
+            {'mode': 'fortran-edit', 'fortran_source': None},
+        ]
+        for payload in invalid:
+            response = self.client.post('/api/jobs', content=json.dumps(payload),
+                headers={**self.headers, 'Content-Type': 'application/json'})
+            self.assertEqual(response.status_code, 400, response.text)
+        unavailable = self.client.post('/api/jobs', json={'mode': 'fortran-edit',
+            'fortran_source': ft, 'compiler': 'ifx'}, headers=self.headers)
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertFalse(self.runner.jobs)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        for mode, source in [('fortran-edit', ''), ('compare-edit', 'print(42)')]:
+            response = self.client.post('/api/jobs', json={'source': source, 'mode': mode,
+                'fortran_source': ft}, headers=self.headers)
+            self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['fortran_source'], ft)
+        self.assertEqual(self.runner.jobs['0']['payload']['source'], '')
+
     def test_python_and_translation_work_without_intel(self):
         for mode in ('python', 'translate'):
             response = self.client.post('/api/jobs', json={'source': 'print(1)',
@@ -109,6 +135,15 @@ class PublicTests(unittest.TestCase):
             'mode': 'compare', 'compiler': 'flang'}, headers=self.headers)
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'flang')
+
+    def test_lfortran_choice_forwarded_only_when_enabled(self):
+        self.service.compilers = ('gfortran', 'lfortran')
+        self.assertEqual(self.client.get('/api/session', headers=self.origin).json()['compilers'],
+                         ['gfortran', 'lfortran'])
+        response = self.client.post('/api/jobs', json={'source': 'print(1)',
+            'mode': 'compare', 'compiler': 'lfortran'}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'lfortran')
 
     def test_ownership_completion_and_cancellation(self):
         identifier = self.submit().json()['id']

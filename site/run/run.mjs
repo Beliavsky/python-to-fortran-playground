@@ -10,11 +10,25 @@ const examples = {
 let token = '', commit = '', revision = 0, active = null, debounce = null, pending = false;
 let downloading = false, connecting = false;
 let serviceURL = '';
-const output = createEditor(get('fortran'), get('fortran-lines'));
+let lastTranslation = '', settingOutput = false;
+const editing = () => Boolean(get('edit-fortran').checked);
+const modified = () => output.getValue() !== lastTranslation;
+function setOutput(value) {
+  settingOutput = true;
+  try { output.setValue(value); } finally { settingOutput = false; }
+  downloading = Boolean(value.trim());
+}
+const output = createEditor(get('fortran'), get('fortran-lines'), () => {
+  if (settingOutput) return;
+  revision++;
+  downloading = Boolean(output.getValue().trim());
+  get('freshness').textContent = 'Fortran changed; previous results are retained.';
+  buttons();
+});
 const input = createEditor(get('python'), get('python-lines'), () => {
   revision++;
-  downloading = false;
-  get('download').disabled = true;
+  downloading = (editing() || modified()) && Boolean(output.getValue().trim());
+  get('download').disabled = !downloading;
   get('freshness').textContent = 'Input changed; previous results are retained.';
   schedule();
 });
@@ -26,6 +40,10 @@ function buttons() {
   get('connect').disabled = connecting || Boolean(active);
   get('download').disabled = !downloading;
   get('compiler').disabled = !token || Boolean(active);
+  get('reset-fortran').disabled = !lastTranslation || !modified() || Boolean(active);
+  get('live').disabled = editing();
+  get('fortran-title').textContent = modified() ? 'Edited Fortran' : 'Generated Fortran';
+  get('run-fortran').textContent = editing() ? 'Compile and Run Fortran' : 'Run Fortran';
 }
 async function api(path, method = 'GET', payload) {
   const response = await fetch(`${serviceURL}/api/${path}`, {
@@ -70,6 +88,8 @@ async function connect() {
     get('compiler-intel').textContent = compilers.includes('ifx') ? 'Intel Fortran (experimental)' : 'Intel Fortran (unavailable)';
     get('compiler-flang').disabled = !compilers.includes('flang');
     get('compiler-flang').textContent = compilers.includes('flang') ? 'LLVM Flang (experimental)' : 'LLVM Flang (unavailable)';
+    get('compiler-lfortran').disabled = !compilers.includes('lfortran');
+    get('compiler-lfortran').textContent = compilers.includes('lfortran') ? 'LFortran (experimental)' : 'LFortran (unavailable)';
     if (!compilers.includes(get('compiler').value)) get('compiler').value = 'gfortran';
     get('connection').textContent = `Connected · p2f ${commit.slice(0, 7)} · ${compilers.join(' / ')} · ${session.timeout} s run limit`;
     get('status').textContent = 'Ready';
@@ -82,7 +102,7 @@ async function connect() {
 }
 function schedule() {
   clearTimeout(debounce); debounce = null; pending = false;
-  if (!get('live').checked || !token || !input.getValue().trim()) return;
+  if (editing() || modified() || !get('live').checked || !token || !input.getValue().trim()) return;
   debounce = setTimeout(() => {
     debounce = null;
     if (active) pending = true;
@@ -94,8 +114,9 @@ function show(result) {
     get('status').textContent = 'Waiting for complete, valid Python…';
     return;
   }
-  if (result.fortran) {
-    output.setValue(result.fortran); downloading = true;
+  if (result.fortran && !result.mode?.endsWith('-edit')) {
+    lastTranslation = result.fortran;
+    setOutput(result.fortran);
   }
   function stage(key, outputId, timeId) {
     const value = result[key];
@@ -113,17 +134,27 @@ function show(result) {
 }
 async function submit(mode, automatic = false) {
   if (!token || active) return;
+  if (editing() && ['fortran', 'both', 'compare'].includes(mode)) mode += '-edit';
+  const editJob = mode.endsWith('-edit');
+  if (!editJob && mode !== 'python' && modified()) {
+    if (automatic || !confirm('Replace your edited Fortran with a new translation?')) return;
+  }
   const source = input.getValue();
+  const fortranSource = output.getValue();
   clearTimeout(debounce); debounce = null; pending = false;
-  if (!source.trim() || new TextEncoder().encode(source).length > 100000) {
+  if ((mode !== 'fortran-edit' && !source.trim()) || new TextEncoder().encode(source).length > 100000) {
     get('status').textContent = 'Enter between 1 byte and 100 KB of Python.'; return;
   }
+  if (editJob && (!fortranSource.trim() || new TextEncoder().encode(fortranSource).length > 100000)) {
+    get('status').textContent = 'Enter between 1 byte and 100 KB of Fortran.'; return;
+  }
   const job = active = { id: null, revision, stopping: false };
-  downloading = false; buttons();
+  downloading = (editing() || modified()) && Boolean(fortranSource.trim()); buttons();
   get('freshness').textContent = 'Operation in progress; previous results are retained.';
   get('status').textContent = mode === 'translate' ? 'Translating…' : 'Running…';
   try {
-    const created = await api('jobs', 'POST', { source, mode, automatic, compiler: get('compiler').value || 'gfortran' });
+    const created = await api('jobs', 'POST', { source, mode, automatic, compiler: get('compiler').value || 'gfortran',
+      ...(editJob ? { fortran_source: fortranSource } : {}) });
     job.id = created.id;
     if (job.stopping) await api(`jobs/${job.id}/cancel`, 'POST', {});
     while (active === job) {
@@ -150,7 +181,7 @@ async function submit(mode, automatic = false) {
   } finally {
     if (active === job) active = null;
     buttons();
-    if (pending && get('live').checked && token) { pending = false; submit('translate', true); }
+    if (pending && !editing() && !modified() && get('live').checked && token) { pending = false; submit('translate', true); }
   }
 }
 get('translate').onclick = () => submit('translate');
@@ -160,6 +191,18 @@ get('run-both').onclick = () => submit('both');
 get('compare').onclick = () => submit('compare');
 get('connect').onclick = connect;
 get('live').onchange = schedule;
+get('edit-fortran').onchange = () => {
+  revision++;
+  output.setReadOnly(!editing());
+  if (editing()) get('live').checked = false;
+  schedule(); buttons();
+  get('freshness').textContent = editing() ? 'Edit mode: run commands use the Fortran pane directly.' : 'Translation mode: manual edits are retained until explicitly replaced.';
+};
+get('reset-fortran').onclick = () => {
+  if (!lastTranslation || !modified() || !confirm('Discard Fortran edits and restore the last translation?')) return;
+  revision++; setOutput(lastTranslation); buttons();
+  get('freshness').textContent = 'Last translation restored; run again to refresh results.';
+};
 get('compiler').onchange = () => {
   revision++;
   get('freshness').textContent = 'Compiler changed; previous results are retained.';
@@ -179,7 +222,9 @@ get('load').onclick = () => {
 };
 get('clear').onclick = () => {
   if (input.getValue() && !input.undoableClear && !confirm('Clear the Python input?')) return;
-  input.setValue('', true); output.setValue('');
+  input.setValue('', true);
+  if (!editing() && !modified()) { lastTranslation = ''; setOutput(''); }
+  buttons();
   for (const id of ['python-output', 'fortran-output', 'diagnostics', 'python-time', 'fortran-time', 'build-time']) get(id).textContent = '';
   input.focus();
 };
@@ -189,7 +234,7 @@ get('download').onclick = () => {
   const link = document.createElement('a'); link.href = url; link.download = 'input_p.f90'; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
-if (typeof window !== 'undefined') enableColoring(input, output).then(() => {
+if (typeof window !== 'undefined') enableColoring(input, output, 'Fortran source').then(() => {
   get('editor-note').textContent = 'Syntax coloring enabled · Tab: indentation · Ctrl+Z: undo · Esc: leave editor.';
 }).catch(() => { get('editor-note').textContent = 'Plain-text editors are available.'; });
 await connect();

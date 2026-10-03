@@ -41,7 +41,7 @@ def precompile(runtime, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('compiler', choices=('gfortran', 'ifx', 'flang'))
+    parser.add_argument('compiler', choices=('gfortran', 'ifx', 'flang', 'lfortran'))
     parser.add_argument('--runtime', type=Path, default=Path('/opt/p2f/runtime'))
     options = parser.parse_args()
     precompile(options.runtime.resolve(), options.compiler)

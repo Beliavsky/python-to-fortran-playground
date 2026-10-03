@@ -1,5 +1,6 @@
 """Real pinned-transpiler, compiler, cancellation, and HTTP boundary checks."""
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -100,6 +101,26 @@ class ExecutionTests(unittest.TestCase):
             self.assertFalse(result['ok'])
             self.assertIn('unavailable', result['error'])
             run.assert_not_called()
+
+    def test_lfortran_selection_and_unavailable_compiler(self):
+        self.assertEqual(xrun.compiler_command('lfortran'), xrun.DEFAULT_LFORTRAN)
+        self.assertIn('--separate-compilation', xrun.DEFAULT_LFORTRAN)
+        self.assertIn('--legacy-array-sections', xrun.DEFAULT_LFORTRAN)
+        with patch('xrun.shutil.which', return_value=None), patch('xrun.run_command') as run:
+            result = xrun.execute(self.runtime, 'print(1)', 'fortran', threading.Event(), compiler_name='lfortran')
+            self.assertFalse(result['ok'])
+            self.assertIn('unavailable', result['error'])
+            run.assert_not_called()
+
+    @unittest.skipUnless(shutil.which('lfortran') and (os.name != 'nt' or shutil.which('cl')),
+                         'LFortran required; Windows also needs an initialized MSVC toolchain')
+    def test_lfortran_precompiled_helpers_and_translations(self):
+        from xverify_flang import verify
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            xrun.unpack_runtime(runtime)
+            precompile(runtime, 'lfortran')
+            verify(runtime, 'lfortran')
 
     @unittest.skipUnless(any(shutil.which(exe) for exe in ('flang-21', 'flang', 'flang-new')),
                          'LLVM Flang compiler required')

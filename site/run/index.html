@@ -27,15 +27,17 @@
       <button id="connect" type="button">Reconnect</button>
       <button id="translate" type="button" disabled>Translate</button>
       <label class="live-toggle"><input id="live" type="checkbox"> Live translation</label>
+      <label class="live-toggle"><input id="edit-fortran" type="checkbox"> Edit Fortran</label>
+      <button id="reset-fortran" type="button" disabled>Restore last translation</button>
     </div>
     <section class="editors" aria-label="Source editors">
       <div class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
-      <div class="panel"><label for="fortran">Generated Fortran <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>
+      <div class="panel"><label for="fortran"><span id="fortran-title">Generated Fortran</span> <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here, or enable Edit Fortran to enter a standalone program."></textarea></div>
     </section>
     <div class="toolbar">
       <button id="run-python" type="button" disabled>Run Python</button>
       <label for="compiler">Fortran compiler</label>
-      <select id="compiler" disabled><option value="gfortran">GNU Fortran</option><option id="compiler-intel" value="ifx" disabled>Intel Fortran (experimental)</option><option id="compiler-flang" value="flang" disabled>LLVM Flang (experimental)</option></select>
+      <select id="compiler" disabled><option value="gfortran">GNU Fortran</option><option id="compiler-intel" value="ifx" disabled>Intel Fortran (experimental)</option><option id="compiler-flang" value="flang" disabled>LLVM Flang (experimental)</option><option id="compiler-lfortran" value="lfortran" disabled>LFortran (experimental)</option></select>
       <button id="run-fortran" type="button" disabled>Run Fortran</button>
       <button id="run-both" class="primary" type="button" disabled>Run Both</button>
       <button id="compare" type="button" disabled>Compare outputs</button>
@@ -51,7 +53,8 @@
     <section class="diagnostics build"><h2>Translation and compilation <span id="build-time" class="line-count"></span></h2><pre id="diagnostics">No translation yet.</pre></section>
     <footer>
       <p id="editor-note">Loading syntax coloring…</p>
-      <p>100 KB source limit · 200 KB per output stream · no interactive input · each run starts afresh.</p>
+      <p>Edit Fortran pauses live translation. Run Fortran compiles the pane directly; Run Both and Compare use that edited source. A standalone Fortran program can also run with empty Python input. Existing python_mod helpers are available automatically; additional libraries are not provided.</p>
+      <p>100 KB per source language · 200 KB per output stream · no interactive input · each run starts afresh.</p>
       <p>Comparison ignores whitespace and allows numerical differences within 1e-10 absolute or relative tolerance. Random draws can differ between Python and Fortran.</p>
       <p>GNU is the default. Intel is optional; availability depends on the service. Compiler failures are reported without silently switching engines.</p>
       <p>Execution sends the source to the connected service. Hosted jobs run in isolated environments with no network access and fresh files for every operation. Local execution uses the permissions of the account running xrun.py.</p>

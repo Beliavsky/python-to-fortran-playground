@@ -15,15 +15,16 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-MAX_REQUEST = 650_000
+MAX_REQUEST = 1_300_000
 MAX_SOURCE = 100_000
 MAX_RESULT = 2_000_000
 MAX_ACTIVE = 2
 MAX_DAILY = 100
 MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
-MODES = {'translate', 'python', 'fortran', 'both', 'compare'}
-COMPILERS = {'gfortran', 'ifx', 'flang'}
+EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit'}
+MODES = {'translate', 'python', 'fortran', 'both', 'compare'} | EDIT_MODES
+COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran'}
 
 
 class PublicService:
@@ -85,7 +86,7 @@ class PublicService:
         async with self.lock:
             board = await self.board()
             owner, session = self.owner(board, token)
-            if (payload.get('mode') in {'fortran', 'both', 'compare'}
+            if (payload.get('mode') in {'fortran', 'both', 'compare'} | EDIT_MODES
                     and payload.get('compiler', 'gfortran') not in self.compilers):
                 raise HTTPException(503, 'Selected compiler is unavailable. Choose GNU Fortran; no automatic fallback was used.')
             await self.reap(board)
@@ -183,16 +184,22 @@ def create_api(service):
             payload = json.loads(content)
             if not isinstance(payload, dict):
                 raise ValueError()
-            source, mode = payload.get('source'), payload.get('mode')
+            source, mode = payload.get('source', ''), payload.get('mode')
             compiler = payload.get('compiler', 'gfortran')
-            if (not isinstance(source, str) or not source.strip() or len(source.encode()) > MAX_SOURCE
+            ft_source = payload.get('fortran_source')
+            if (not isinstance(source, str) or (not source.strip() and mode != 'fortran-edit') or len(source.encode()) > MAX_SOURCE
                     or not isinstance(mode, str) or mode not in MODES
+                    or (mode in EDIT_MODES and (not isinstance(ft_source, str) or not ft_source.strip()
+                        or len(ft_source.encode()) > MAX_SOURCE or payload.get('automatic', False)))
                     or not isinstance(payload.get('automatic', False), bool)
                     or not isinstance(compiler, str) or compiler not in COMPILERS):
                 raise ValueError()
         except (ValueError, UnicodeError):
-            raise HTTPException(400, 'Enter up to 100 KB of Python and a valid operation.')
-        return await service.submit(token, {key: payload[key] for key in ('source', 'mode', 'automatic', 'compiler') if key in payload})
+            raise HTTPException(400, 'Enter valid source (up to 100 KB per language) and a valid operation.')
+        payload['source'] = source
+        return await service.submit(token, {key: payload[key] for key in
+            ('source', 'mode', 'automatic', 'compiler', 'fortran_source') if key in payload
+            and (key != 'fortran_source' or mode in EDIT_MODES)})
 
     @api.get('/api/jobs/{identifier}')
     async def job(identifier: str, request: Request):
