@@ -1,4 +1,5 @@
 import { createEditor, enableColoring } from './editors.mjs';
+import {sourceTools, translationSettings, saveText} from './source_tools.mjs';
 const get = id => document.getElementById(id);
 const examples = {
   sum: 'total = 0\nfor i in range(1, 11):\n    total += i * i\nprint(total)\n',
@@ -14,6 +15,18 @@ const input = createEditor(get('python'), get('python-lines'), () => {
   scheduleLive();
 });
 input.setValue(examples.sum);
+const tools = sourceTools({get, input, output, pause: () => { get('live').checked = false; cancelLiveTimer(); },
+  pythonChanged: () => { markStale(); get('status').textContent = 'Python loaded or annotations applied; translate explicitly.'; },
+  fortranChanged: () => {}, requestAnnotations: source => new Promise(resolve => {
+    if (!ready || active) { resolve({ok: false, diagnostics: 'Wait for initialization or the current operation.'}); return; }
+    active = {id: ++requestId, revision, annotationResolve: resolve};
+    get('translate').disabled = get('suggest-annotations').disabled = true; get('cancel').disabled = false;
+    timer = setTimeout(() => fail('Annotation suggestions timed out.', true), 180000);
+    worker.postMessage({type: 'annotate', id: active.id, source});
+  })});
+for (const id of ['translation-int-kind', 'translation-comments']) get(id).onchange = () => {
+  revision++; markStale(); scheduleLive();
+};
 function markStale() {
   get('download').disabled = true;
   get('fortran-state').textContent = output.getValue() ? 'Previous translation — input changed' : 'No translation yet';
@@ -43,8 +56,10 @@ function finish() {
   clearTimeout(timer); timer = null; active = null;
   get('cancel').disabled = true;
   get('translate').disabled = !deploymentLoaded || Boolean(worker && !ready);
+  get('suggest-annotations').disabled = !ready;
 }
 function fail(message, destroy = false) {
+  const annotationResolve = active?.annotationResolve;
   if (destroy) {
     worker?.terminate(); worker = null; ready = false;
     cancelLiveTimer(); get('live').checked = false;
@@ -53,6 +68,7 @@ function fail(message, destroy = false) {
   }
   finish(); markStale(); get('status').textContent = 'Not translated';
   get('diagnostics').textContent = message;
+  annotationResolve?.({ok: false, diagnostics: message});
 }
 function startWorker() {
   ready = false;
@@ -81,6 +97,7 @@ function startWorker() {
     }
     if (data.type !== 'result' || !active || data.id !== active.id) return;
     const job = active; finish();
+    if (job.annotationResolve) { job.annotationResolve(data); return; }
     if (job.revision !== revision) {
       get('status').textContent = 'Previous result discarded — input changed';
       runPending(); return;
@@ -93,7 +110,7 @@ function startWorker() {
       fail(data.diagnostics);
     } else {
       output.setValue(data.fortran); get('fortran-state').textContent = 'Current translation';
-      const completion = `Translation completed. Time elapsed: ${data.translationSeconds.toFixed(2)} s (translation only). Initialization: ${initializationSeconds.toFixed(2)} s (reused). Compilation was not checked.`;
+      const completion = `Translation completed. Time elapsed: ${data.translationSeconds.toFixed(2)} s (translation only). Initialization: ${initializationSeconds.toFixed(2)} s (reused). Compilation was not checked.\nTranslation settings: ${JSON.stringify(job.options)}`;
       get('diagnostics').textContent = data.diagnostics ? `${completion}\n\n${data.diagnostics}` : completion;
       get('status').textContent = `Translated · ${data.commit.slice(0, 7)}`;
       get('download').disabled = false;
@@ -111,9 +128,10 @@ function translate(automatic = false) {
   get('diagnostics').textContent = automatic ? 'Checking syntax and translating…' : 'Translating…';
   get('translate').disabled = true; get('cancel').disabled = false;
   get('status').textContent = 'Translating…';
-  active = { id: ++requestId, revision };
+  active = { id: ++requestId, revision, options: translationSettings(get) };
+  get('suggest-annotations').disabled = true;
   timer = setTimeout(() => fail('Translation exceeded 180 seconds. Live mode is paused. Click Initialize to restart; try a smaller example.', true), 180000);
-  worker.postMessage({ type: 'translate', id: active.id, source, automatic });
+  worker.postMessage({ type: 'translate', id: active.id, source, automatic, translation_options: active.options });
 }
 get('live').onchange = () => {
   if (get('live').checked) {
@@ -136,9 +154,7 @@ get('cancel').onclick = () => fail('Cancelled. Your input is preserved and live 
 get('translate').onclick = () => translate(false);
 get('download').onclick = () => {
   if (get('download').disabled) return;
-  const url = URL.createObjectURL(new Blob([output.getValue()], { type: 'text/plain' }));
-  const link = document.createElement('a'); link.href = url; link.download = 'input_p.f90'; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveText(output.getValue(), tools.fortranFilename());
 };
 if (typeof window !== 'undefined') {
   enableColoring(input, output).then(() => {

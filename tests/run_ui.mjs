@@ -22,7 +22,7 @@ const sleep = setTimeout;
 globalThis.fetch = async (url, options = {}) => {
   let payload;
   if (url === './service.json') payload = { url: '' };
-  else if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', compilers, timeout: 30, compiler_options: optionCatalog };
+  else if (url === '/api/session') payload = { token: 'test-token', commit: '123abcdef', compiler: 'gfortran', compilers, timeout: 30, compiler_options: optionCatalog, source_tools: true };
   else if (url === '../vendor/manifest.json') payload = { commit: '123abcdef' };
   else if (url === '/api/jobs') {
     created = JSON.parse(options.body); jobNumber++;
@@ -50,6 +50,7 @@ state = { state: 'done', result };
 await get('compare').onclick();
 assert.equal(created.mode, 'compare');
 assert.equal(created.compiler, 'gfortran');
+assert.deepEqual(created.translation_options, {int_kind: 'default', preserve_comments: true});
 assert.deepEqual(created.compiler_options, {preset: 'default', warnings: false, fast_math: false});
 get('compiler-preset').value = 'debug'; get('compiler-preset').onchange();
 get('compiler-warnings').checked = true; get('compiler-warnings').onchange();
@@ -179,6 +180,19 @@ assert.match(get('fortran').value, /newer/);
 get('edit-fortran').checked = false; get('edit-fortran').onchange();
 assert.equal(get('fortran').readOnly, true);
 assert.match(get('fortran').value, /newer/);
+get('translation-int-kind').value = 'int64'; get('translation-int-kind').onchange();
+get('translation-comments').checked = false; get('translation-comments').onchange();
+state = {state: 'done', result: {...result, mode: 'translate'}};
+await get('translate').onclick();
+assert.deepEqual(created.translation_options, {int_kind: 'int64', preserve_comments: false});
+assert.equal(get('suggest-annotations').disabled, false);
+const beforeAnnotations = get('fortran').value;
+state = {state: 'done', result: {ok: true, mode: 'annotate', count: 1,
+  annotated: 'def f(x: int): return x\nf(1)\n', diagnostics: 'Review'}};
+await get('suggest-annotations').onclick();
+assert.equal(created.mode, 'annotate');
+assert.equal(get('annotation-preview-panel').hidden, false);
+assert.equal(get('fortran').value, beforeAnnotations);
 submissionStatus = 503;
 await get('translate').onclick();
 assert.match(get('diagnostics').textContent, /Provisioning failed/);

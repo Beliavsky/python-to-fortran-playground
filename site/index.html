@@ -32,6 +32,20 @@
       <button id="cancel" type="button" disabled>Cancel</button>
     </div>
     <p id="live-note" class="version">Optional: translate after a 750 ms typing pause. Incomplete Python waits; code is never executed.</p>
+    <div id="translation-tools" class="toolbar">
+      <label for="translation-int-kind">Integer kind</label>
+      <select id="translation-int-kind"><option value="default">Compiler default</option><option value="int32">int32</option><option value="int64">int64</option></select>
+      <label><input id="translation-comments" type="checkbox" checked> Preserve comments</label>
+      <button id="load-python-file" type="button">Load Python file</button><input id="file-python" type="file" accept=".py,text/plain" hidden>
+      <button id="suggest-annotations" type="button" disabled>Suggest type annotations</button>
+    </div>
+    <p id="source-tools-status" class="version" role="status">Files are read locally. Annotation suggestions do not execute your code.</p>
+    <section id="annotation-preview-panel" class="diagnostics annotation-preview" hidden>
+      <h2>Annotation preview (review before applying)</h2>
+      <textarea id="annotation-preview" readonly spellcheck="false" aria-label="Annotated Python preview"></textarea>
+      <pre id="annotation-diagnostics"></pre>
+      <div class="toolbar"><button id="annotation-apply" type="button" disabled>Apply suggestions</button><button id="annotation-download" type="button" disabled>Download annotated Python</button></div>
+    </section>
     <section class="editors" aria-label="Source editors">
       <div class="panel"><label for="python">Python input <span class="line-count" id="python-lines">0 lines</span></label><textarea id="python" spellcheck="false" aria-describedby="limits"></textarea></div>
       <div class="panel"><label for="fortran">Generated Fortran <span class="line-count" id="fortran-lines">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here."></textarea></div>

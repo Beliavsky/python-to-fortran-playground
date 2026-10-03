@@ -37,6 +37,21 @@
       <div id="python-panel" class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
       <div class="panel"><label for="fortran"><span id="fortran-title">Generated Fortran</span> <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here, or enable Edit Fortran to enter a standalone program."></textarea></div>
     </section>
+    <div id="translation-tools" class="toolbar">
+      <label for="translation-int-kind">Integer kind</label>
+      <select id="translation-int-kind"><option value="default">Compiler default</option><option value="int32">int32</option><option value="int64">int64</option></select>
+      <label><input id="translation-comments" type="checkbox" checked> Preserve comments</label>
+      <button id="load-python-file" type="button">Load Python file</button><input id="file-python" type="file" accept=".py,text/plain" hidden>
+      <button id="suggest-annotations" type="button" disabled>Suggest type annotations</button>
+    </div>
+    <div class="toolbar"><button id="load-fortran-file" type="button">Load Fortran file</button><input id="file-fortran" type="file" accept=".f90,.f95,.f03,.f08,text/plain" hidden></div>
+    <p id="source-tools-status" class="version" role="status">Files are read locally; hosted actions send source to the service. Loading never executes code.</p>
+    <section id="annotation-preview-panel" class="diagnostics annotation-preview" hidden>
+      <h2>Annotation preview (review before applying)</h2>
+      <textarea id="annotation-preview" readonly spellcheck="false" aria-label="Annotated Python preview"></textarea>
+      <pre id="annotation-diagnostics"></pre>
+      <div class="toolbar"><button id="annotation-apply" type="button" disabled>Apply suggestions</button><button id="annotation-download" type="button" disabled>Download annotated Python</button></div>
+    </section>
     <div class="toolbar">
       <button id="run-python" type="button" disabled>Run Python</button>
       <label for="compiler">Fortran compiler</label>

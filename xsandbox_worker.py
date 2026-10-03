@@ -29,10 +29,12 @@ def main():
                          threading.Event(), timeout=30, automatic=payload.get('automatic', False),
                          compiler_name=payload.get('compiler', 'gfortran'),
                          fortran_source=payload.get('fortran_source'),
-                         compiler_options=payload.get('compiler_options'))
+                         compiler_options=payload.get('compiler_options'),
+                         translation_options=payload.get('translation_options'))
     except Exception as error:
         result = {'ok': False, 'error': str(error)}
-    # Do not echo submitted source to the control plane or its logs.
+    # Return results only; do not separately log submitted input. Annotation
+    # results necessarily contain the suggested Python source, like Fortran results.
     print(json.dumps(result, ensure_ascii=False), flush=True)
 
 

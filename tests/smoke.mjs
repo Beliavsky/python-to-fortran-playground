@@ -12,6 +12,9 @@ console.time('Runtime startup');
 const py = await loadPyodide();
 py.unpackArchive(new Uint8Array(zip), 'zip', { extractDir: '/upstream' });
 await py.runPythonAsync("import sys\nsys.path.insert(0, '/upstream')");
+py.FS.writeFile('/annotations.py', await readFile(new URL('site/annotations.py', root), 'utf8'));
+py.FS.writeFile('/translation_settings.py', await readFile(new URL('site/translation_settings.py', root), 'utf8'));
+await py.runPythonAsync("sys.path.insert(0, '/')\nfrom annotations import annotate_json");
 await py.runPythonAsync(await readFile(new URL('site/bridge.py', root), 'utf8'));
 console.timeEnd('Runtime startup');
 for (const [source, expected] of [
@@ -55,6 +58,21 @@ result = JSON.parse(await py.runPythonAsync('translate(submission)'));
 assert.equal(result.ok, false);
 assert.match(result.diagnostics, /100 KB/);
 console.log('PASS size limit');
+py.globals.set('submission', '# KEEP_THIS_COMMENT\nn = 2\nprint(n)\n');
+result = JSON.parse(await py.runPythonAsync("translate(submission, options={'int_kind': 'int64', 'preserve_comments': False})"));
+assert.equal(result.ok, true, result.diagnostics);
+assert.match(result.fortran, /int64/);
+assert.doesNotMatch(result.fortran, /KEEP_THIS_COMMENT/);
+result = JSON.parse(await py.runPythonAsync('translate(submission)'));
+assert.equal(result.ok, true, result.diagnostics);
+assert.match(result.fortran, /KEEP_THIS_COMMENT/);
+assert.doesNotMatch(result.fortran, /ikind/);
+py.globals.set('submission', 'def f(x): return x\nf(2)\n');
+result = JSON.parse(await py.runPythonAsync('annotate_json(submission)'));
+assert.equal(result.ok, true, result.diagnostics);
+assert.match(result.annotated, /x: int/);
+assert.equal(py.runPython("'f' in globals()"), false);
+console.log('PASS integer/comment settings, option reset, and non-executing annotation preview');
 // Reverse-order repetition after failures must produce the same source.
 for (const [name, source] of [...cases].reverse()) {
   py.globals.set('submission', source);

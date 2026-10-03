@@ -76,6 +76,15 @@ assert.equal(workers.length, 2);
 workers[0].receive({ type: 'ready', initializationSeconds: 1 });
 assert.equal(get('translate').disabled, true);
 workers[1].receive({ type: 'ready', initializationSeconds: 2 });
+const annotationPromise = get('suggest-annotations').onclick();
+const annotationJob = workers[1].sent.at(-1);
+assert.equal(annotationJob.type, 'annotate');
+workers[1].receive({type: 'result', id: annotationJob.id, ok: true, count: 1,
+  annotated: 'def f(x: int): return x\nf(2)\n', diagnostics: 'Review'});
+await annotationPromise;
+assert.equal(get('annotation-preview-panel').hidden, false);
+assert.equal(get('annotation-preview').value, 'def f(x: int): return x\nf(2)\n');
+assert.equal(get('translate').disabled, false);
 get('translate').onclick();
 [...timers.values()][0]();
 assert.equal(workers[1].terminated, true);

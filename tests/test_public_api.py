@@ -112,6 +112,24 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(self.runner.jobs['0']['payload']['compiler_options'], selection)
 
+    def test_translation_settings_and_annotation_mode(self):
+        self.assertTrue(self.client.get('/api/session', headers=self.origin).json()['source_tools'])
+        for selection in ('--compile', [], {'int_kind': []}, {'int_kind': 'real64'},
+                          {'preserve_comments': 'yes'}, {'flags': '--module'}):
+            response = self.client.post('/api/jobs', json={'source': 'print(1)',
+                'mode': 'translate', 'translation_options': selection}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(self.runner.jobs)
+        selection = {'int_kind': 'int64', 'preserve_comments': False}
+        response = self.client.post('/api/jobs', json={'source': 'print(1)',
+            'mode': 'translate', 'translation_options': selection}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['translation_options'], selection)
+        response = self.client.post('/api/jobs', json={'source': 'def f(x): return x\nf(2)',
+            'mode': 'annotate'}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['1']['payload']['mode'], 'annotate')
+
     def test_edited_fortran_validation_and_forwarding(self):
         ft = 'program demo\nprint *, 42\nend program demo\n'
         invalid = [

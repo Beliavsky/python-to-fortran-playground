@@ -32,4 +32,7 @@ button:disabled { opacity: .5; cursor: default; }
 h2 { font-size: 14px; margin: 0 0 8px; }
 .diagnostics pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 Consolas, monospace; }
 footer { margin-top: 20px; line-height: 1.6; }
+[hidden] { display: none !important; }
+.annotation-preview { margin-bottom: 18px; }
+.annotation-preview textarea { display: block; width: 100%; height: 260px; margin: 12px 0; font: 14px/1.6 Consolas, monospace; white-space: pre; }
 @media (max-width: 760px) { main { padding: 20px 14px; } .editors { grid-template-columns: 1fr; } .panel > textarea, .CodeMirror { height: 300px; } #status { margin-left: 0; width: 100%; } }

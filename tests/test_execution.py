@@ -212,6 +212,7 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(error.exception.code, 403)
             headers = {"Content-Type": "application/json", "X-P2F-Token": session["token"]}
             for payload in ([], {"source": "print(1)", "mode": []}, {"source": "x" * 100001, "mode": "python"},
+                            {"source": "print(1)", "mode": "translate", "translation_options": {'int_kind': []}},
                             {"source": "print(1)", "mode": "fortran", "compiler": "ifx -O3"},
                             {"source": "print(1)", "mode": "fortran", "compiler_options": {'flags': '-O3'}},
                             {"source": "print(1)", "mode": "fortran", "compiler_options": {'preset': []}}):

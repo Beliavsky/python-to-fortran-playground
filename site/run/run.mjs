@@ -1,4 +1,5 @@
 import { createEditor, enableColoring } from '../editors.mjs';
+import {sourceTools, translationSettings, saveText} from '../source_tools.mjs';
 
 const get = id => document.getElementById(id);
 const actions = ['translate', 'run-python', 'run-fortran', 'run-both', 'compare'];
@@ -15,6 +16,7 @@ let fortranOnly = false, previousEditMode = false;
 let token = '', commit = '', revision = 0, active = null, debounce = null, pending = false;
 let downloading = false, connecting = false;
 let serviceURL = '';
+let sourceToolsAvailable = false;
 let optionCatalog = {};
 function selectedOptions() {
   return { preset: get('compiler-preset').value || 'default',
@@ -58,6 +60,17 @@ const input = createEditor(get('python'), get('python-lines'), () => {
   schedule();
 });
 input.setValue(examples.sum);
+const tools = sourceTools({get, input, output,
+  pause: () => { get('live').checked = false; clearTimeout(debounce); debounce = null; pending = false; },
+  pythonChanged: () => {},
+  fortranChanged: source => {
+    get('edit-fortran').checked = true; output.setReadOnly(false);
+    revision++; setOutput(source); buttons();
+    get('freshness').textContent = 'Fortran file loaded; compilation results are stale.';
+  }, requestAnnotations: () => submit('annotate')});
+for (const id of ['translation-int-kind', 'translation-comments']) get(id).onchange = () => {
+  revision++; get('freshness').textContent = 'Translation options changed; previous results are retained.'; schedule();
+};
 
 function buttons() {
   for (const id of actions) get(id).disabled = !token || Boolean(active) || (fortranOnly && id !== 'run-fortran');
@@ -70,6 +83,8 @@ function buttons() {
   get('fortran-title').textContent = fortranOnly ? 'Fortran input' : modified() ? 'Edited Fortran' : 'Generated Fortran';
   get('run-fortran').textContent = editing() ? 'Compile and Run Fortran' : 'Run Fortran';
   get('fortran-only').disabled = Boolean(active);
+  get('suggest-annotations').disabled = !sourceToolsAvailable || !token || Boolean(active) || fortranOnly;
+  for (const id of ['translation-int-kind', 'translation-comments']) get(id).disabled = !sourceToolsAvailable || Boolean(active);
   optionControls();
 }
 function changeLayout() {
@@ -86,7 +101,9 @@ function changeLayout() {
   fortranOnly = enabled;
   get('run-layout').classList.toggle('fortran-only', enabled);
   for (const id of ['python-panel', 'python-output-panel', 'python-example-label', 'example',
-    'translate', 'live-label', 'edit-fortran-label', 'reset-fortran', 'run-python', 'run-both', 'compare', 'comparison-note']) get(id).hidden = enabled;
+    'translate', 'live-label', 'edit-fortran-label', 'reset-fortran', 'run-python', 'run-both', 'compare', 'comparison-note',
+    'translation-tools']) get(id).hidden = enabled;
+  if (enabled) get('annotation-preview-panel').hidden = true;
   get('fortran-example-label').hidden = get('fortran-example').hidden = !enabled;
   get('page-heading').textContent = enabled ? 'Fortran playground' : 'Python → Fortran';
   get('eyebrow').textContent = enabled ? 'EDIT · COMPILE · RUN' : 'TRANSLATE · RUN · COMPARE';
@@ -142,6 +159,7 @@ async function connect() {
     const manifest = await response.json();
     if (manifest.commit !== session.commit) throw new Error('Service and page use different transpiler revisions.');
     token = session.token; commit = session.commit;
+    sourceToolsAvailable = session.source_tools === true;
     optionCatalog = session.compiler_options || {};
     const compilers = session.compilers || ['gfortran'];
     get('compiler-intel').disabled = !compilers.includes('ifx');
@@ -187,6 +205,7 @@ function show(result) {
   stage('execution', 'fortran-output', 'fortran-time');
   stage('build', 'diagnostics', 'build-time');
   if (result.error) get('diagnostics').textContent = result.error;
+  if (result.translation_options) get('diagnostics').textContent += `\nTranslation settings: ${JSON.stringify(result.translation_options)}`;
   const comparison = result.matches === undefined ? '' : result.matches ? ' · outputs match' : ' · outputs differ';
   const engine = result.execution || ['fortran', 'both', 'compare'].includes(result.mode) ? ` · ${result.compiler || 'gfortran'}` : '';
   get('status').textContent = `${result.ok ? 'Completed' : 'Failed'}${comparison}${engine} · ${(result.seconds || 0).toFixed(2)} s total`;
@@ -216,12 +235,14 @@ async function submit(mode, automatic = false) {
   try {
     const created = await api('jobs', 'POST', { source, mode, automatic, compiler: get('compiler').value || 'gfortran',
       ...(editJob ? { fortran_source: fortranSource } : {}),
+      ...(sourceToolsAvailable ? {translation_options: translationSettings(get)} : {}),
       ...(optionCatalog[get('compiler').value] ? { compiler_options: selectedOptions() } : {}) });
     job.id = created.id;
     if (job.stopping) await api(`jobs/${job.id}/cancel`, 'POST', {});
     while (active === job) {
       const state = await api(`jobs/${job.id}`);
       if (state.state === 'done') {
+        if (mode === 'annotate') return job.stopping ? {ok: false, diagnostics: 'Stopped'} : state.result;
         if (job.stopping) get('status').textContent = 'Stopped';
         else if (job.revision === revision) show(state.result);
         else get('status').textContent = 'Previous result discarded — input changed';
@@ -311,9 +332,7 @@ get('clear').onclick = () => {
 };
 get('download').onclick = () => {
   if (!downloading) return;
-  const url = URL.createObjectURL(new Blob([output.getValue()], { type: 'text/plain' }));
-  const link = document.createElement('a'); link.href = url; link.download = 'input_p.f90'; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveText(output.getValue(), tools.fortranFilename());
 };
 if (typeof window !== 'undefined') enableColoring(input, output, 'Fortran source').then(() => {
   input.refresh(); output.refresh();

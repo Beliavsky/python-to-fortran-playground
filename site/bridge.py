@@ -89,11 +89,15 @@ def syntax_status(source):
         return 'invalid'
 
 
-def translate(source, vendor_dir='/upstream', work_dir='/work'):
+def translate(source, vendor_dir='/upstream', work_dir='/work', options=None):
     diagnostics = io.StringIO()
     if len(source.encode('utf-8')) > 100_000:
         return json.dumps({'ok': False, 'diagnostics': 'Input exceeds the 100 KB prototype limit.'})
     try:
+        from translation_settings import validate_options, strip_fortran_comments
+        selection = validate_options(options)
+        kind = selection['int_kind']
+        comments = selection['preserve_comments']
         work = Path(work_dir)
         work.mkdir(parents=True, exist_ok=True)
         with contextlib.redirect_stdout(diagnostics), contextlib.redirect_stderr(diagnostics), \
@@ -107,6 +111,7 @@ def translate(source, vendor_dir='/upstream', work_dir='/work'):
             result = xp2f.transpile_file(
                 Path(job) / 'input.py', [Path(vendor_dir) / 'python.f90'], flat=True,
                 src_override=source, out_path=output,
+                int_kind=None if kind == 'default' else kind,
             )
             if output.exists():
                 fortran = output.read_text(encoding='utf-8')
@@ -114,6 +119,8 @@ def translate(source, vendor_dir='/upstream', work_dir='/work'):
                 fortran = result
             else:
                 raise RuntimeError('Upstream returned no generated Fortran file')
+            if not comments:
+                fortran = strip_fortran_comments(fortran)
         return json.dumps({'ok': True, 'fortran': fortran, 'diagnostics': diagnostics.getvalue()})
     except Exception as exc:
         return json.dumps({'ok': False, 'diagnostics': diagnostics.getvalue() + f'{type(exc).__name__}: {exc}'})

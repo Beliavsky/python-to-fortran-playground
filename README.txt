@@ -387,6 +387,57 @@ The old service does not accept the new edit operations. Local previews use
 the updated xrun.py immediately after restarting it. Check direct compilation:
   python -m unittest discover -s tests -p test_fortran_edit.py
 
+Source tools: settings, local files, annotation suggestions
+---------------------------------------------------------
+Both Python playgrounds offer integer kinds (compiler default/int32/int64)
+and Preserve comments. The pinned xp2f transpile API and CLI support int-kind.
+Comment preservation is a playground display/output setting: disabling it
+filters ordinary Fortran comments AFTER translation, retaining quoted ! text
+and compiler directives. It does not disable source-comment inference hints
+or change helper code. Settings are printed with results, validated server-side,
+and never change a manually edited Fortran pane. These controls are hidden in
+Fortran-only mode. The pinned upstream revision remains unchanged.
+
+Load Python file is available on both pages. Load Fortran file is available
+on /run/ and enables Edit Fortran automatically. Files are decoded locally as
+UTF-8 (an optional BOM is accepted), limited to 100 KB, and confirmed before
+replacing nonempty code. Invalid UTF-8/binary files report an error. Loading
+preserves the other editor and pauses live translation. It never translates
+or executes code. Download names follow the loaded filename where applicable.
+No folders, multiple files, dependencies or data-file uploads are supported.
+
+Suggest type annotations parses source without running it. Review the
+read-only preview and diagnostics, then explicitly Apply suggestions or
+Download annotated Python. Applying is undoable in the enhanced editor,
+pauses live translation and never runs/translates source. A stale preview
+cannot replace newer Python. This is Pyccel-compatible annotation syntax,
+not a guarantee of Pyccel compilation or type correctness.
+
+The playground uses its own small conservative helper rather than the older
+xannotate_for_pyccel.py header rewriter. It inserts parameter annotations only
+and verifies that the AST is otherwise unchanged. It preserves existing
+annotations, inline bodies, multiline signatures, positional-only markers,
+comments, Unicode and line endings. It refuses conflicting/unknown evidence
+instead of widening types. Inference considers simple literals, singly-bound
+module variables and NumPy array constructors at direct module-scope callers.
+Nested/decorated/async/variadic functions, unresolved forwarding callers,
+return annotations and complicated expressions are not inferred. Suggestions
+are for review, not a proof: mutation, aliasing and dynamic Python remain
+outside this limited analysis.
+
+The translation-only page performs annotation analysis inside its existing
+browser worker. /run/ sends annotation requests to the isolated hosted worker;
+they consume the same job quota as other operations. Suggested Python appears
+in the private job result and may appear in Modal's sandbox output logs, just
+like generated Fortran. Input is not separately stored in the state Dict.
+Local file selection alone does not send file contents anywhere.
+
+Push the page changes and redeploy the service using xdeploy_service.py.
+Against an older service, /run/ disables annotation/settings controls until
+the service advertises source_tools support; local file loading still works.
+Tests: node tests/source_tools.mjs and
+  python -m unittest discover -s tests -p test_source_tools.py
+
 Fortran-only playground
 ----------------------
 Open /run/?mode=fortran for the dedicated Fortran layout, or toggle Fortran
