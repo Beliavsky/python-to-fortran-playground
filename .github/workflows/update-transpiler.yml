@@ -1,0 +1,118 @@
+name: Update transpiler
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Published p2f commit SHA (leave blank for latest main)'
+        required: false
+        type: string
+permissions:
+  contents: read
+# Share the lock with pages.yml; do not interrupt an in-flight service update.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check deployment credentials and preserve previous pin
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          test -n "$MODAL_TOKEN_ID" || { echo 'Missing MODAL_TOKEN_ID repository secret'; exit 1; }
+          test -n "$MODAL_TOKEN_SECRET" || { echo 'Missing MODAL_TOKEN_SECRET repository secret'; exit 1; }
+          cp upstream.json "$RUNNER_TEMP/p2f-previous-pin.json"
+      - name: Select published upstream revision
+        id: revision
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UPSTREAM_COMMIT: ${{ inputs.commit }}
+        run: python xupdate_upstream.py --commit "$UPSTREAM_COMMIT"
+      - name: Build and test candidate
+        run: |
+          python xvendor.py
+          npm ci
+          python xeditor.py
+          sudo apt-get update
+          sudo apt-get install -y gfortran
+          python -m pip install numpy -r requirements-execution.txt
+          python -m unittest discover -s tests -p 'test_*.py'
+          npm test
+          python xsite.py
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Ensure main has not advanced during tests
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo 'main changed; rerun the update'; exit 1; }
+      - name: Deploy matching execution service
+        id: service
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: python -X utf8 xdeploy_service.py
+      - name: Verify service revision, isolation, and real executions
+        run: |
+          python -c "import json, subprocess, sys; url=json.load(open('site/run/service.json'))['url']; subprocess.run([sys.executable, 'xconnect_service.py', url], check=True)"
+          python -X utf8 xcheck_service.py
+      - name: Commit tested pin to main
+        id: publish
+        env:
+          UPSTREAM_COMMIT: ${{ steps.revision.outputs.commit }}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo 'main changed; rerun the update'; exit 1; }
+          git add upstream.json site/run/service.json
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "Update playground transpiler to $UPSTREAM_COMMIT"
+            git push origin HEAD:main
+          fi
+      # GITHUB_TOKEN pushes do not trigger pages.yml; deploy this tested artifact.
+      - name: Publish matching playground
+        id: pages
+        uses: actions/deploy-pages@v4
+      - name: Restore previous service if update failed before pin publication
+        if: failure() && steps.service.outcome != 'skipped' && steps.service.outcome != '' && steps.publish.outcome != 'success'
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          cp "$RUNNER_TEMP/p2f-previous-pin.json" upstream.json
+          python xvendor.py
+          python -X utf8 xdeploy_service.py
+          python -X utf8 xcheck_service.py
+      - name: Record update outcome
+        if: always()
+        env:
+          UPSTREAM_COMMIT: ${{ steps.revision.outputs.commit }}
+          PIN_PUBLISHED: ${{ steps.publish.outcome }}
+          PAGES_PUBLISHED: ${{ steps.pages.outcome }}
+        run: |
+          echo "Selected p2f revision: $UPSTREAM_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pin publication: $PIN_PUBLISHED; Pages deployment: $PAGES_PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PIN_PUBLISHED" = success ] && [ "$PAGES_PUBLISHED" != success ]; then
+            echo 'The tested service and pin are updated, but Pages failed. Run Test and deploy playground to retry Pages.' >> "$GITHUB_STEP_SUMMARY"
+          fi

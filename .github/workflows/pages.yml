@@ -10,9 +10,13 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # A queued older push must not revert a completed pin update.
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -29,6 +33,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_execution.py
       - run: npm test
       - run: python -m unittest discover -s tests -p test_site_build.py
+      - run: python -m unittest discover -s tests -p test_update_upstream.py
       - run: python xsite.py
       - uses: actions/upload-pages-artifact@v4
         with:

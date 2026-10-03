@@ -64,6 +64,46 @@ xvendor.py and the smoke tests, and commit the pin change. Never mix individual
 upstream files from different revisions. A transpiler push does not update
 this separate project automatically.
 
+On-demand upstream updates
+--------------------------
+In the playground repository, choose Actions > Update transpiler > Run
+workflow on main. Leave commit blank for the latest published p2f main commit,
+or supply a complete published SHA to select a specific version or roll back.
+The workflow freezes that SHA, rebuilds the bundle, runs the Python and
+WebAssembly/browser-adapter tests, builds the Pages artifact, deploys the
+matching Modal service, checks its revision/isolation and three real jobs,
+commits the tested pin, and publishes Pages. It does not change the parent
+transpiler repository. No schedule or update-on-page-load is enabled.
+
+One-time setup in the PLAYGROUND repository:
+  Settings > Secrets and variables > Actions > New repository secret
+  Add MODAL_TOKEN_ID and MODAL_TOKEN_SECRET from a Modal API token belonging
+  to the workspace hosting p2f-playground-execution. Never commit the token.
+  https://modal.com/docs/guide/continuous-deployment describes these secrets.
+The workflow requests contents:write and Pages/OIDC permissions. Repository
+rules must allow its github-actions bot to push pin commits to main; protected
+branches requiring a PR may reject this. It also honors github-pages environment
+approval rules. The existing service URL in site/run/service.json must be valid.
+Keep Modal usage budgets/spend limits set: image builds and checks cost compute,
+and each successful update uses three jobs from the public execution quota.
+
+Both deployment workflows share a concurrency lock. Normal pushes still run
+Test and deploy playground; pushes made by GITHUB_TOKEN do not trigger another
+workflow, so Update transpiler publishes its own tested artifact directly.
+https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow
+After a successful automated update, run git pull --ff-only in your local
+playground checkout before making further changes.
+
+Testing failures leave the pin and live deployments unchanged. If deployment
+or verification fails before the pin is pushed, the workflow attempts to restore
+the previous service. Inspect logs if restoration itself fails. Modal and Pages
+cannot switch atomically: /run/ may briefly refuse a revision mismatch while
+Pages updates (the translation-only page stays usable). If pin publication
+succeeds but Pages fails, the tested new service/pin remain; run Test and deploy
+playground to retry Pages. Cancellation/timeouts may require manual recovery;
+avoid cancelling after service deployment has begun. An advancing main branch
+or a rejected push aborts publication rather than overwriting anyone's changes.
+
 Implementation
 --------------
 site/ contains static HTML/CSS/JavaScript plus a Python translation adapter.
