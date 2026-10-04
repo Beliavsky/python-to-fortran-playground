@@ -1,11 +1,9 @@
 import { createEditor, enableColoring } from './editors.mjs';
 import {sourceTools, translationSettings, saveText} from './source_tools.mjs';
+import {pythonExamples, populateExamples, describeExample} from './examples.mjs';
 const get = id => document.getElementById(id);
-const examples = {
-  sum: 'total = 0\nfor i in range(1, 11):\n    total += i * i\nprint(total)\n',
-  function: 'def square(x: float) -> float:\n    return x * x\n\nprint(square(1.5))\nprint(square(3.0))\n',
-  numpy: 'import numpy as np\n\nx = np.array([1.0, 2.0, 3.0])\ny = x * x\nprint(np.sum(y))\n'
-};
+populateExamples(get('example')); describeExample(get);
+get('example').onchange = () => describeExample(get);
 let worker = null, timer = null, liveTimer = null, ready = false, deploymentLoaded = false;
 let initializationSeconds = 0, requestId = 0, revision = 0, active = null, livePending = false;
 const output = createEditor(get('fortran'), get('fortran-lines'));
@@ -14,7 +12,7 @@ const input = createEditor(get('python'), get('python-lines'), () => {
   if (ready) get('status').textContent = active ? 'Translating previous input…' : 'Input changed';
   scheduleLive();
 });
-input.setValue(examples.sum);
+input.setValue(pythonExamples.sum.source);
 const tools = sourceTools({get, input, output, pause: () => { get('live').checked = false; cancelLiveTimer(); },
   pythonChanged: () => { markStale(); get('status').textContent = 'Python loaded or annotations applied; translate explicitly.'; },
   fortranChanged: () => {}, requestAnnotations: source => new Promise(resolve => {
@@ -140,9 +138,12 @@ get('live').onchange = () => {
   } else { cancelLiveTimer(); }
 };
 get('load').onclick = () => {
+  const example = pythonExamples[get('example').value];
+  if (!example) return;
   if (input.getValue().trim() && !confirm('Replace the Python input with this example?')) return;
-  input.setValue(examples[get('example').value]);
-  get('diagnostics').textContent = 'Example loaded; translation is not current yet.';
+  get('live').checked = false; cancelLiveTimer();
+  input.setValue(example.source, true); input.focus();
+  get('diagnostics').textContent = 'Example loaded; live translation paused. Click Translate when ready.';
 };
 get('clear').onclick = () => {
   if (input.getValue() && !input.undoableClear && !confirm('Clear the Python input?')) return;

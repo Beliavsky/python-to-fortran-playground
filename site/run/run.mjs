@@ -1,13 +1,11 @@
 import { createEditor, enableColoring } from '../editors.mjs';
 import {sourceTools, translationSettings, saveText} from '../source_tools.mjs';
+import {pythonExamples, populateExamples, describeExample} from '../examples.mjs';
 
 const get = id => document.getElementById(id);
 const actions = ['translate', 'run-python', 'run-fortran', 'run-both', 'compare'];
-const examples = {
-  sum: 'total = 0\nfor i in range(1, 11):\n    total += i * i\nprint(total)\n',
-  function: 'def square(x: float) -> float:\n    return x * x\n\nprint(square(1.5))\nprint(square(3.0))\n',
-  numpy: 'import numpy as np\nx = np.array([1.0, 2.0, 3.0])\nprint(np.sum(x * x))\n',
-};
+populateExamples(get('example')); describeExample(get);
+get('example').onchange = () => describeExample(get);
 const fortranExamples = {
   sum: 'program main\n   implicit none\n   integer :: i, total\n   total = 0\n   do i = 1, 10\n      total = total + i*i\n   end do\n   print *, total\nend program main\n',
   helper: 'program main\n   use, intrinsic :: iso_fortran_env, only: real64\n   use python_mod, only: mean\n   implicit none\n   real(real64) :: x(3) = [1.0_real64, 2.0_real64, 3.0_real64]\n   print *, mean(x)\nend program main\n',
@@ -59,7 +57,7 @@ const input = createEditor(get('python'), get('python-lines'), () => {
   get('freshness').textContent = 'Input changed; previous results are retained.';
   schedule();
 });
-input.setValue(examples.sum);
+input.setValue(pythonExamples.sum.source);
 const tools = sourceTools({get, input, output,
   pause: () => { get('live').checked = false; clearTimeout(debounce); debounce = null; pending = false; },
   pythonChanged: () => {},
@@ -102,7 +100,7 @@ function changeLayout() {
   get('run-layout').classList.toggle('fortran-only', enabled);
   for (const id of ['python-panel', 'python-output-panel', 'python-example-label', 'example',
     'translate', 'live-label', 'edit-fortran-label', 'reset-fortran', 'run-python', 'run-both', 'compare', 'comparison-note',
-    'translation-tools']) get(id).hidden = enabled;
+    'translation-tools', 'example-note']) get(id).hidden = enabled;
   if (enabled) get('annotation-preview-panel').hidden = true;
   get('fortran-example-label').hidden = get('fortran-example').hidden = !enabled;
   get('page-heading').textContent = enabled ? 'Fortran playground' : 'Python → Fortran';
@@ -313,7 +311,11 @@ get('load').onclick = () => {
     return;
   }
   if (input.getValue().trim() && !confirm('Replace the Python input with this example?')) return;
-  input.setValue(examples[get('example').value]);
+  const example = pythonExamples[get('example').value];
+  if (!example) return;
+  get('live').checked = false; clearTimeout(debounce); debounce = null; pending = false;
+  input.setValue(example.source, true); input.focus();
+  get('freshness').textContent = 'Example loaded; live translation paused. Use Translate or a Run button when ready.';
 };
 get('clear').onclick = () => {
   if (fortranOnly) {

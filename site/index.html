@@ -22,8 +22,6 @@
       <label for="example">Example</label>
       <select id="example">
         <option value="sum">Sum of squares</option>
-        <option value="function">A numerical function</option>
-        <option value="numpy">NumPy array</option>
       </select>
       <button id="load" type="button">Load example</button>
       <button id="clear" type="button">Clear</button>
@@ -31,6 +29,7 @@
       <label class="live-toggle"><input id="live" type="checkbox" aria-describedby="live-note"> Live translation</label>
       <button id="cancel" type="button" disabled>Cancel</button>
     </div>
+    <p id="example-note" class="version"><span id="example-description"></span> <a id="example-source" target="_blank" rel="noopener noreferrer" hidden></a></p>
     <p id="live-note" class="version">Optional: translate after a 750 ms typing pause. Incomplete Python waits; code is never executed.</p>
     <div id="translation-tools" class="toolbar">
       <label for="translation-int-kind">Integer kind</label>

@@ -3,6 +3,7 @@ import { loadPyodide } from 'pyodide';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
+import {pythonExamples} from '../site/examples.mjs';
 const root = new URL('../', import.meta.url);
 process.on('uncaughtException', error => { console.error(String(error)); process.exit(1); });
 const manifest = JSON.parse(await readFile(new URL('site/vendor/manifest.json', root), 'utf8'));
@@ -95,3 +96,10 @@ assert.equal(py.runPython("len(list(Path('/work').iterdir()))"), 0);
 console.log('PASS upstream state reset and temporary-file cleanup');
 assert.equal(manifest.pyodide, '0.27.7');
 console.log(`Pinned upstream ${manifest.commit}`);
+for (const [name, example] of Object.entries(pythonExamples)) {
+  py.globals.set('submission', example.source);
+  const result = JSON.parse(await py.runPythonAsync('translate(submission)'));
+  assert.equal(result.ok, true, `built-in ${name}: ${result.diagnostics}`);
+  assert.match(result.fortran, /program /i);
+  console.log(`PASS built-in browser translation ${name}`);
+}

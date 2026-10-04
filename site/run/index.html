@@ -22,7 +22,7 @@
     <div class="toolbar">
       <label class="live-toggle"><input id="fortran-only" type="checkbox"> Fortran only</label>
       <label id="python-example-label" for="example">Example</label>
-      <select id="example"><option value="sum">Sum of squares</option><option value="function">A numerical function</option><option value="numpy">NumPy array</option></select>
+      <select id="example"><option value="sum">Sum of squares</option></select>
       <label id="fortran-example-label" for="fortran-example" hidden>Fortran example</label>
       <select id="fortran-example" hidden><option value="sum">Sum of squares</option><option value="helper">python_mod mean</option></select>
       <button id="load" type="button">Load example</button>
@@ -33,6 +33,7 @@
       <label id="edit-fortran-label" class="live-toggle"><input id="edit-fortran" type="checkbox"> Edit Fortran</label>
       <button id="reset-fortran" type="button" disabled>Restore last translation</button>
     </div>
+    <p id="example-note" class="version"><span id="example-description"></span> <a id="example-source" target="_blank" rel="noopener noreferrer" hidden></a></p>
     <section class="editors" aria-label="Source editors">
       <div id="python-panel" class="panel"><label for="python">Python input <span id="python-lines" class="line-count">0 lines</span></label><textarea id="python" spellcheck="false"></textarea></div>
       <div class="panel"><label for="fortran"><span id="fortran-title">Generated Fortran</span> <span id="fortran-lines" class="line-count">0 lines</span></label><textarea id="fortran" readonly spellcheck="false" placeholder="Your translation will appear here, or enable Edit Fortran to enter a standalone program."></textarea></div>

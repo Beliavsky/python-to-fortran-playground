@@ -4,6 +4,32 @@ Python-to-Fortran playground (local prototype)
 The existing GitHub Pages homepage translates in the browser. The optional
 /run/ page adds execution using a local service; the homepage remains available.
 
+Built-in examples
+-----------------
+Both Python pages share 20 small single-file examples in a categorized selector:
+Basics, NumPy, Statistics, Numerical methods, Linear algebra, and Simulation.
+The original three demonstrations remain available; the additional examples
+are short adaptations of files in the upstream examples/ directory, with a
+source link and description shown beside the selector. The complete catalog
+is kept in site/examples.mjs, so loading does not fetch a moving upstream file.
+
+Choose an example, then click Load example. Replacing nonempty Python input
+requires confirmation. Loading is undoable and pauses live translation; it
+never translates, compiles, or runs automatically. Existing Fortran and results
+remain visible but stale. The Fortran-only mode retains its separate examples.
+The two random examples are labeled explicitly: even identical seed values
+do not make Python and Fortran RNG streams agree, so Compare may report DIFF.
+No example needs local data files or user modules; NumPy is the only third-party
+Python dependency. Problem sizes are deliberately small.
+
+Every example is checked against the pinned bundle in the browser-runtime smoke
+test. tests/test_examples.py compiles and runs all of them with GNU Fortran,
+compares deterministic output with Python, and checks that both random programs
+run successfully. Helpers are precompiled once for this test group. Run it with:
+  python -m unittest discover -s tests -p test_examples.py
+Changing upstream.json requires revalidating this catalog; the examples are
+not a claim that every upstream example or every optional compiler is supported.
+
 Execution preview on Windows
 ----------------------------
   cd C:\python\python-to-fortran-playground
