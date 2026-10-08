@@ -29,7 +29,7 @@ MAX_SOURCE = 100_000
 MAX_OUTPUT = 200_000
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 COMPILE_MODES = {'fortran', 'both', 'compare'} | EDIT_MODES
-MODES = {"translate", "annotate", "format", "python", "fortran", "both", "compare"} | EDIT_MODES
+MODES = {"translate", "annotate", "format", "check", "python", "fortran", "both", "compare"} | EDIT_MODES
 MAX_EXECUTABLE = 4 * 1024 * 1024
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
@@ -267,21 +267,37 @@ def compare_outputs(left, right, tolerance=1e-10):
     return True
 
 
+def fortitude_command():
+    """Prefer the executable installed beside this service's Python interpreter."""
+    sibling = Path(sys.executable).with_name('fortitude.exe' if os.name == 'nt' else 'fortitude')
+    return str(sibling) if sibling.is_file() else 'fortitude'
+
+
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
             compiler_name="gfortran", fortran_source=None, compiler_options=None, translation_options=None,
             retain_executable=False, executable=None):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
-    if mode == 'format':
+    if mode in {'format', 'check'}:
         if (automatic or not isinstance(source, str) or not source.strip()
                 or len(source.encode('utf-8')) > MAX_SOURCE):
-            return {**result, 'error': 'Enter up to 100 KB of Fortran to format explicitly.'}
+            return {**result, 'error': 'Enter up to 100 KB of Fortran for an explicit source-tool operation.'}
         with tempfile.TemporaryDirectory(prefix='p2f_format_') as directory:
             job = Path(directory)
             (job / 'input.f90').write_text(source.replace('\r\n', '\n').replace('\r', '\n'), encoding='utf-8')
-            stage = run_command([sys.executable, str(ROOT / 'xformat_fortran.py')],
+            command = ([sys.executable, str(ROOT / 'xformat_fortran.py')] if mode == 'format' else
+                       [fortitude_command(), '--isolated', 'check', '--no-fix', '--no-preview',
+                        '--output-format', 'concise', '--progress-bar', 'off', 'input.f90'])
+            stage = run_command(command,
                                 job, cancel, min(timeout, 15))
+        if mode == 'check':
+            # Exit 1 reports lint findings, not an infrastructure/job failure.
+            completed = stage.get('exit_code') in (0, 1) and not stage['stderr'].strip()
+            return {**result, 'ok': completed, 'checking': stage,
+                    'findings': completed and stage['exit_code'] == 1,
+                    'error': None if completed else stage['stderr'] or 'Fortitude could not complete the check.',
+                    'seconds': time.perf_counter() - started}
         result['formatting'] = stage
         if stage['ok'] and not stage['stderr'].strip() and stage['stdout'].strip() and len(stage['stdout'].encode('utf-8')) <= MAX_SOURCE:
             result.update(ok=True, formatted_source=stage['stdout'].replace('\r\n', '\n').replace('\r', '\n'))
@@ -479,7 +495,8 @@ class Handler(SimpleHTTPRequestHandler):
                              "compilers": compilers, 'compiler_options': compiler_catalog(self.server.runtime, compilers, self.server.compiler),
                              'compiler_versions': {name: compiler_version(self.server.runtime, name,
                                  compiler_command(name, self.server.compiler)) for name in compilers},
-                             'source_tools': True, 'features': {'format': importlib.util.find_spec('fprettify') is not None}})
+                             'source_tools': True, 'features': {'format': importlib.util.find_spec('fprettify') is not None,
+                                                               'check': Path(fortitude_command()).is_file() or shutil.which(fortitude_command()) is not None}})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
                 return
@@ -520,7 +537,7 @@ class Handler(SimpleHTTPRequestHandler):
             if (not isinstance(mode, str) or mode not in MODES
                     or not valid_source or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
-                    or (mode == 'format' and payload.get('automatic', False))
+                    or (mode in {'format', 'check'} and payload.get('automatic', False))
                     or not isinstance(choice, str) or choice not in COMPILERS
                     or not isinstance(payload.get("automatic", False), bool)):
                 self.reply(400, {"error": "Enter valid source (up to 100 KB per language) and a valid operation."})

@@ -37,12 +37,13 @@ def main():
     args = parser.parse_args()
     from xmodal import (ROOT, RUNTIME_IMAGE_NAME, INTEL_IMAGE_NAME, FLANG_IMAGE_NAME,
                         LFORTRAN_IMAGE_NAME, job_image, intel_job_image, flang_job_image,
-                        lfortran_job_image)
+                        lfortran_job_image, TOOLS_IMAGE_NAME, tools_job_image)
     build_app = modal.App.lookup('p2f-playground-execution', create_if_missing=True)
     intel_enabled = False
     flang_enabled = False
     lfortran_enabled = False
     with modal.enable_output():
+        tools_job_image.build(build_app).publish(TOOLS_IMAGE_NAME)
         job_image.build(build_app).publish(RUNTIME_IMAGE_NAME)
         if not args.without_intel:
             try:

@@ -21,7 +21,7 @@ def runtime_image_name():
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
     for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py',
-                     'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
+                     'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xbuild_helpers.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
                      'xverify_flang.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
@@ -36,85 +36,79 @@ FLANG_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-flang'
 FLANG_ENABLED = os.environ.get('P2F_FLANG_ENABLED') == '1'
 LFORTRAN_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-lfortran'
 LFORTRAN_ENABLED = os.environ.get('P2F_LFORTRAN_ENABLED') == '1'
+TOOLS_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-tools'
 
-job_image = (
+# Nothing from the application, formatter, linter, or upstream bundle belongs
+# ahead of a compiler installation. Modal can reuse these stable parent layers.
+gnu_toolchain_image = (
     modal.Image.debian_slim(python_version='3.12')
     .apt_install('gfortran')
-    .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3', 'fprettify==0.3.7')
-    .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
-    .add_local_file(ROOT / 'xformat_fortran.py', '/opt/p2f/xformat_fortran.py', copy=True)
-    .add_local_file(ROOT / 'compiler_options.py', '/opt/p2f/compiler_options.py', copy=True)
-    .add_local_file(ROOT / 'translation_options.py', '/opt/p2f/translation_options.py', copy=True)
-    .add_local_file(ROOT / 'site/translation_settings.py', '/opt/p2f/site/translation_settings.py', copy=True)
-    .add_local_file(ROOT / 'site/annotations.py', '/opt/p2f/site/annotations.py', copy=True)
-    .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
-    .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
-    .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
-    .add_local_file(ROOT / 'upstream.json', '/opt/p2f/upstream.json', copy=True)
-    .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/site/vendor/manifest.json', copy=True)
-    .add_local_file(ROOT / 'site/vendor/upstream.zip', '/opt/p2f/site/vendor/upstream.zip', copy=True)
-    .run_commands(
-        'mkdir -p /opt/p2f/runtime /work',
-        "PYTHONPATH=/opt/p2f python -c \"from pathlib import Path; from xrun import unpack_runtime; unpack_runtime(Path('/opt/p2f/runtime'))\"",
-        'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran',
-        'chmod 1777 /work',
-    )
-    .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
 )
 
 # Separate optional image: GNU jobs do not pull Intel's toolchain.
 intel_installed_image = (
-    job_image
+    gnu_toolchain_image
     .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
     .pip_install('certifi==2026.2.25')
     .add_local_file(ROOT / 'xinstall_intel.sh', '/opt/p2f/xinstall_intel.sh', copy=True)
-    .add_local_file(ROOT / 'xverify_intel.py', '/opt/p2f/xverify_intel.py', copy=True)
     .run_commands('bash /opt/p2f/xinstall_intel.sh')
 )
-intel_job_image = intel_installed_image.run_commands(
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py ifx',
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
 
 # Independent optional image; no Intel installation or cross-compiler modules.
 flang_installed_image = (
-    job_image
+    gnu_toolchain_image
     .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
     .pip_install('certifi==2026.2.25')
     .add_local_file(ROOT / 'xinstall_flang.sh', '/opt/p2f/xinstall_flang.sh', copy=True)
-    .add_local_file(ROOT / 'xverify_flang.py', '/opt/p2f/xverify_flang.py', copy=True)
     .run_commands('bash /opt/p2f/xinstall_flang.sh')
 )
-flang_job_image = flang_installed_image.run_commands(
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang',
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
 
 # Conda is LFortran's recommended binary installation. Keep its libraries
 # independent of GNU/Intel/Flang and use exactly the compiler tested by the probe.
 lfortran_installed_image = (
     modal.Image.micromamba(python_version='3.12')
     .micromamba_install('lfortran=0.66.0=hd7e4fe6_4', channels=['conda-forge'])
-    .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
-    .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
-    .add_local_file(ROOT / 'compiler_options.py', '/opt/p2f/compiler_options.py', copy=True)
-    .add_local_file(ROOT / 'translation_options.py', '/opt/p2f/translation_options.py', copy=True)
-    .add_local_file(ROOT / 'site/translation_settings.py', '/opt/p2f/site/translation_settings.py', copy=True)
-    .add_local_file(ROOT / 'site/annotations.py', '/opt/p2f/site/annotations.py', copy=True)
-    .add_local_file(ROOT / 'xcompile_fortran.py', '/opt/p2f/xcompile_fortran.py', copy=True)
-    .add_local_file(ROOT / 'xprecompile.py', '/opt/p2f/xprecompile.py', copy=True)
-    .add_local_file(ROOT / 'xverify_flang.py', '/opt/p2f/xverify_flang.py', copy=True)
-    .add_local_file(ROOT / 'xsandbox_worker.py', '/opt/p2f/xsandbox_worker.py', copy=True)
-    .add_local_file(ROOT / 'upstream.json', '/opt/p2f/upstream.json', copy=True)
-    .add_local_file(ROOT / 'site/vendor/manifest.json', '/opt/p2f/site/vendor/manifest.json', copy=True)
-    .add_local_file(ROOT / 'site/vendor/upstream.zip', '/opt/p2f/site/vendor/upstream.zip', copy=True)
-    .run_commands(
-        'mkdir -p /opt/p2f/runtime /work',
-        "PYTHONPATH=/opt/p2f python -c \"from pathlib import Path; from xrun import unpack_runtime; unpack_runtime(Path('/opt/p2f/runtime'))\"",
-        'chmod 1777 /work')
-    .env({'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
 )
-lfortran_job_image = lfortran_installed_image.run_commands(
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py lfortran',
+
+
+def helper_image(base, name, command):
+    image = base.pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
+    for filename in ('xbuild_helpers.py', 'upstream.json', 'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
+        image = image.add_local_file(ROOT / filename, '/opt/p2f/' + filename, copy=True)
+    return image.run_commands(
+        f'python /opt/p2f/xbuild_helpers.py {name} --command "{command}"')
+
+
+def application_image(base, source_tools=False):
+    image = base
+    for filename in ('xrun.py', 'compiler_options.py', 'translation_options.py',
+                     'site/translation_settings.py', 'site/annotations.py', 'xcompile_fortran.py',
+                     'xprecompile.py', 'xsandbox_worker.py', 'xverify_intel.py', 'xverify_flang.py'):
+        image = image.add_local_file(ROOT / filename, '/opt/p2f/' + filename, copy=True)
+    if source_tools:
+        image = image.add_local_file(ROOT / 'xformat_fortran.py', '/opt/p2f/xformat_fortran.py', copy=True)
+    return image.run_commands('mkdir -p /work', 'chmod 1777 /work').env(
+        {'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
+
+
+# Reverify application changes against cached helpers; do not rebuild artifacts.
+job_image = application_image(helper_image(gnu_toolchain_image, 'gfortran',
+    'gfortran -ffree-line-length-none')).run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran --verify-only')
+intel_job_image = application_image(helper_image(intel_installed_image, 'ifx', 'p2f-ifx')).run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py ifx --verify-only',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
+flang_job_image = application_image(helper_image(flang_installed_image, 'flang', 'flang-21')).run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang --verify-only',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
+lfortran_job_image = application_image(helper_image(lfortran_installed_image, 'lfortran',
+    'lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections')).run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py lfortran --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py --compiler lfortran')
+
+# Formatting and linting have no compiler or helper dependency.
+tools_job_image = application_image(modal.Image.debian_slim(python_version='3.12')
+    .pip_install('fprettify==0.3.7', 'fortitude-lint==0.9.2'), source_tools=True)
 
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
@@ -144,13 +138,18 @@ class Store:
         await state.pop.aio(key, None)
 
 
+def job_image_name(payload):
+    if payload.get('mode') in {'format', 'check'}:
+        return TOOLS_IMAGE_NAME
+    if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile', 'fortran-run'}:
+        return {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
+                'lfortran': LFORTRAN_IMAGE_NAME}.get(payload.get('compiler'), RUNTIME_IMAGE_NAME)
+    return RUNTIME_IMAGE_NAME
+
+
 class Sandboxes:
     async def start(self, payload):
-        image_name = RUNTIME_IMAGE_NAME
-        if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile', 'fortran-run'}:
-            image_name = {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
-                          'lfortran': LFORTRAN_IMAGE_NAME}.get(
-                payload.get('compiler'), RUNTIME_IMAGE_NAME)
+        image_name = job_image_name(payload)
         sandbox = await modal.Sandbox.create.aio(
             'python', '/opt/p2f/xsandbox_worker.py',
             # Runtime containers cannot upload files from the developer's

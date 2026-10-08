@@ -24,9 +24,11 @@ class DeploymentTests(unittest.TestCase):
         flang.build.side_effect = flang_error
         lfortran.build.side_effect = lfortran_error
         definitions = SimpleNamespace(ROOT=Path('/repo'), RUNTIME_IMAGE_NAME='gnu-image',
+            TOOLS_IMAGE_NAME='tools-image', tools_job_image=Mock(),
             INTEL_IMAGE_NAME='intel-image', FLANG_IMAGE_NAME='flang-image',
             LFORTRAN_IMAGE_NAME='lfortran-image', job_image=gnu, intel_job_image=intel,
             flang_job_image=flang, lfortran_job_image=lfortran)
+        definitions.tools_job_image.build.return_value = definitions.tools_job_image
         with patch.dict(sys.modules, {'xmodal': definitions}), \
                 patch.object(sys, 'argv', ['xdeploy_service.py', *args]), \
                 patch.object(xdeploy_service.modal.App, 'lookup'), \
@@ -37,6 +39,7 @@ class DeploymentTests(unittest.TestCase):
                 patch.dict(os.environ, {'P2F_INTEL_ENABLED': 'unexpected', 'P2F_FLANG_ENABLED': 'unexpected',
                                        'P2F_LFORTRAN_ENABLED': 'unexpected'}):
             xdeploy_service.main()
+        definitions.tools_job_image.publish.assert_called_once_with('tools-image')
         return gnu, intel, flang, lfortran, deploy
 
     def test_success_enables_intel_only_after_build_and_publish(self):

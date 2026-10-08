@@ -35,6 +35,9 @@ jobs:
       - run: python -m unittest discover -s tests -p test_compiler_options.py
       - run: python -m unittest discover -s tests -p test_source_tools.py
       - run: python -m unittest discover -s tests -p test_formatting.py
+      - run: python -m unittest discover -s tests -p test_checking.py
+      - run: python -m unittest discover -s tests -p test_image_layers.py
+      - run: python -m unittest discover -s tests -p test_helper_build.py
       - run: python -m unittest discover -s tests -p test_examples.py
       - run: npm test
       - run: python -m unittest discover -s tests -p test_site_build.py

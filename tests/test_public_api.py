@@ -44,6 +44,17 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_checking_is_explicit_and_never_retains_an_executable(self):
+        self.assertTrue(self.client.get('/api/session', headers=self.origin).json()['features']['check'])
+        for extras in ({'automatic': True}, {'retain_executable': True}, {'source': ''}):
+            response = self.client.post('/api/jobs', json={
+                'source': 'program main\nend', 'mode': 'check', **extras}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(self.runner.jobs)
+        response = self.client.post('/api/jobs', json={'source': 'program main\nend', 'mode': 'check'}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertNotIn('retain_executable', self.runner.jobs['0']['payload'])
+
     def test_formatting_is_explicit_bounded_and_has_no_retained_binary(self):
         features = self.client.get('/api/session', headers=self.origin).json()['features']
         self.assertTrue(features['format'])

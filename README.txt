@@ -595,8 +595,22 @@ Redeploy with .venv-execution\Scripts\python.exe xdeploy_service.py before using
 the new buttons. Session features advertise support; old services leave the new
 frontend buttons disabled. No hosted deployment is performed by local tests.
 Fortran formatting: the Fortran-only frontend can submit explicit format jobs
-using fprettify==0.3.7 in the isolated GNU runtime image. These jobs do not invoke
+using fprettify==0.3.7 in an isolated compiler-free tools image. These jobs do not invoke
 a compiler or execute source; they use fixed three-space indentation with no
 case changes, ignore formatting-option annotations, and share the usual job
 limits. For local formatting, install: python -m pip install fprettify==0.3.7.
 Redeploy with xdeploy_service.py to enable this feature on the hosted frontend.
+
+Fortitude checking: explicit check jobs use fortitude-lint==0.9.2 with isolated
+configuration, default rules, the default Fortran 2018 target, and no fixes.
+Lint findings are successful checks with issues, not failed compiler jobs.
+These source tools share normal quotas, cancellation, network isolation, and
+15-second per-tool limits. Local installation is included in requirements-execution.txt.
+
+Build-cache boundaries: compiler installations precede numerical dependencies,
+the pinned upstream bundle and helper objects, and finally application files.
+Application edits reverify cached helpers but do not recompile them. Only a
+changed toolchain, helper builder, numerical dependencies, or upstream bundle
+invalidates the helper-build layer. Formatter/linter packages are separate from
+all compiler images. The first deployment after restructuring can rebuild layers;
+later application updates reuse them, subject to Modal's cache availability.

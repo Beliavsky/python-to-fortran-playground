@@ -46,8 +46,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('compiler', choices=('gfortran', 'ifx', 'flang', 'lfortran'))
     parser.add_argument('--runtime', type=Path, default=Path('/opt/p2f/runtime'))
+    parser.add_argument('--verify-only', action='store_true', help='Verify cached helpers without recompiling them')
     options = parser.parse_args()
-    precompile(options.runtime.resolve(), options.compiler)
+    if options.verify_only:
+        manifest_path = options.runtime / 'precompiled' / options.compiler / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['standards'] = probe_standards(compiler_command(options.compiler), options.compiler)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
+    else:
+        precompile(options.runtime.resolve(), options.compiler)
     verify_options(options.runtime.resolve(), options.compiler)
 
 
