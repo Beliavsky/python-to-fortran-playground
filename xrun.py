@@ -1,5 +1,6 @@
 """Serve the execution playground for trusted local use (never a public sandbox)."""
 import argparse
+import base64
 import codeop
 from dataclasses import dataclass, field
 import hashlib
@@ -23,9 +24,10 @@ from translation_options import validate_options, cli_options, strip_fortran_com
 ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
 MAX_OUTPUT = 200_000
-EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit'}
+EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 COMPILE_MODES = {'fortran', 'both', 'compare'} | EDIT_MODES
 MODES = {"translate", "annotate", "python", "fortran", "both", "compare"} | EDIT_MODES
+MAX_EXECUTABLE = 4 * 1024 * 1024
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
@@ -195,7 +197,8 @@ def compare_outputs(left, right, tolerance=1e-10):
 
 
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
-            compiler_name="gfortran", fortran_source=None, compiler_options=None, translation_options=None):
+            compiler_name="gfortran", fortran_source=None, compiler_options=None, translation_options=None,
+            retain_executable=False, executable=None):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
@@ -204,6 +207,25 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
     settings = validate_options(translation_options)
     result['compiler_options'] = compiler_options or {'preset': 'default'}
     result['translation_options'] = settings if mode not in EDIT_MODES else None
+    if mode == 'fortran-run':
+        # The public API retrieves this blob from private, session-owned storage.
+        # It is never executed in the API container and is not an upload endpoint.
+        if not isinstance(executable, str) or len(executable) > (MAX_EXECUTABLE + 2) // 3 * 4:
+            return {**result, 'error': 'Retained executable is missing or exceeds the size limit.'}
+        try:
+            binary = base64.b64decode(executable, validate=True)
+        except ValueError:
+            return {**result, 'error': 'Retained executable is invalid.'}
+        if not binary or len(binary) > MAX_EXECUTABLE:
+            return {**result, 'error': 'Retained executable is invalid.'}
+        with tempfile.TemporaryDirectory(prefix='p2f_rerun_') as directory:
+            exe = Path(directory) / 'input_p.exe'
+            exe.write_bytes(binary)
+            exe.chmod(0o700)
+            result['execution'] = run_command([str(exe)], Path(directory), cancel, timeout)
+        result.update(ok=result['execution']['ok'], reused_executable=True,
+                      translation_options=None, seconds=time.perf_counter() - started)
+        return result
     if mode in COMPILE_MODES and not shutil.which(shlex.split(command_text)[0]):
         return {**result, "error": f"{compiler_name} is unavailable in this execution environment. "
                 "Choose GNU Fortran or ask the service owner to install the selected compiler."}
@@ -261,7 +283,21 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
                 result['build']['seconds'] += translated['seconds']
         if mode in {"python", "both", "compare", 'both-edit', 'compare-edit'}:
             result["python"] = run_command([sys.executable, "input.py"], py, cancel, timeout)
-        if mode in COMPILE_MODES and result["build"]["ok"]:
+        if (retain_executable and mode in {'fortran-compile', 'fortran-edit'}
+                and result.get('build', {}).get('ok') and not cancel.is_set()):
+            exe = ft / 'input_p.exe'
+            if exe.is_file() and 0 < exe.stat().st_size <= MAX_EXECUTABLE:
+                # Snapshot before running: submitted code cannot replace the
+                # retained build by modifying files during its execution.
+                with exe.open('rb') as stream:
+                    binary = stream.read(MAX_EXECUTABLE + 1)
+                if len(binary) <= MAX_EXECUTABLE:
+                    result['_artifact'] = base64.b64encode(binary).decode('ascii')
+                else:
+                    result['artifact_note'] = 'Build succeeded, but the executable is too large to retain for Run Again.'
+            else:
+                result['artifact_note'] = 'Build succeeded, but the executable is too large to retain for Run Again.'
+        if mode in COMPILE_MODES and mode != 'fortran-compile' and result["build"]["ok"]:
             # The pinned upstream CLI uses .exe on every platform.
             exe = ft / "input_p.exe"
             result["execution"] = run_command([str(exe)], ft, cancel, timeout)
@@ -387,8 +423,8 @@ class Handler(SimpleHTTPRequestHandler):
                 valid_ft = isinstance(ft_source, str) and bool(ft_source.strip()) and len(ft_source.encode()) <= MAX_SOURCE
             except UnicodeError:
                 valid_source = valid_ft = False
-            if (not valid_source or (not source.strip() and mode != 'fortran-edit')
-                    or not isinstance(mode, str) or mode not in MODES
+            if (not isinstance(mode, str) or mode not in MODES
+                    or not valid_source or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
                     or not isinstance(choice, str) or choice not in COMPILERS
                     or not isinstance(payload.get("automatic", False), bool)):

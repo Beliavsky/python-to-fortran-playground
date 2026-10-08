@@ -4,6 +4,7 @@ The backend must launch isolated sandboxes. This module never executes source.
 The deployment uses one API container so its lock serializes state changes.
 """
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -19,21 +20,25 @@ from translation_options import validate_options
 
 MAX_REQUEST = 1_300_000
 MAX_SOURCE = 100_000
-MAX_RESULT = 2_000_000
+MAX_RESULT = 8_000_000  # Includes the private, bounded executable export.
+MAX_EXECUTABLE = 4 * 1024 * 1024
+ARTIFACT_TTL = 300
+MAX_ARTIFACTS = 32
 MAX_ACTIVE = 2
 MAX_DAILY = 100
 MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
-EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit'}
-MODES = {'translate', 'annotate', 'python', 'fortran', 'both', 'compare'} | EDIT_MODES
+EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
+MODES = {'translate', 'annotate', 'python', 'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
 COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran'}
 
 
 class PublicService:
-    def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',)):
+    def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',), runtime_namespace=None):
         self.store, self.runner, self.commit, self.clock = store, runner, commit, clock
         self.lock = asyncio.Lock()
         self.compilers = tuple(compilers)
+        self.runtime_namespace = runtime_namespace or commit
 
     async def board(self):
         board = await self.store.get('board', None)
@@ -41,6 +46,12 @@ class PublicService:
             board = {'secret': secrets.token_hex(32), 'sessions': {}, 'jobs': {}, 'rates': {}, 'day': '', 'daily': 0}
         now = self.clock()
         board['sessions'] = {k: v for k, v in board['sessions'].items() if v['expires'] > now}
+        artifacts = board.setdefault('artifacts', {})
+        for identifier, artifact in list(artifacts.items()):
+            if (artifact['expires'] <= now or artifact['owner'] not in board['sessions']
+                    or artifact['runtime'] != self.runtime_namespace):
+                await self.store.pop('artifact:' + identifier)
+                del artifacts[identifier]
         board['rates'] = {k: [t for t in times if t > now - 600] for k, times in board['rates'].items() if times and times[-1] > now - 600}
         for identifier, job in list(board['jobs'].items()):
             if job['expires'] < now:
@@ -68,7 +79,38 @@ class PublicService:
             board['sessions'][key] = {'expires': self.clock() + 3600, 'address': address_key}
             await self.store.put('board', board)
             return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
-                    'compilers': list(self.compilers), 'hosted': True, 'compiler_options': OPTIONS, 'source_tools': True}
+                    'compilers': list(self.compilers), 'hosted': True, 'compiler_options': OPTIONS, 'source_tools': True,
+                    'features': {'compile_only': True, 'run_again': True, 'artifact_ttl': ARTIFACT_TTL}}
+
+    async def retain(self, board, job, result):
+        blob = result.pop('_artifact', None)  # Never return executable bytes to browsers.
+        if (not job.get('retain_executable') or job.get('mode') not in {'fortran-compile', 'fortran-edit'}
+                or job.get('runtime') != self.runtime_namespace
+                or not result.get('build', {}).get('ok') or not isinstance(blob, str)):
+            return
+        if len(blob) > (MAX_EXECUTABLE + 2) // 3 * 4:
+            return
+        try:
+            binary = base64.b64decode(blob, validate=True)
+        except ValueError:
+            return
+        if not binary or len(binary) > MAX_EXECUTABLE or job['owner'] not in board['sessions']:
+            return
+        artifacts = board['artifacts']
+        # At most one retained executable per session, with a global size bound.
+        for identifier, artifact in list(artifacts.items()):
+            if artifact['owner'] == job['owner']:
+                await self.store.pop('artifact:' + identifier)
+                del artifacts[identifier]
+        if len(artifacts) >= MAX_ARTIFACTS:
+            result['artifact_note'] = 'The retained-build allowance is full. Compile again later to enable Run Again.'
+            return
+        identifier = secrets.token_urlsafe(24)
+        expires = min(self.clock() + ARTIFACT_TTL, board['sessions'][job['owner']]['expires'])
+        artifacts[identifier] = {'owner': job['owner'], 'expires': expires, 'compiler': job['compiler'],
+                                'compiler_options': job.get('compiler_options'), 'runtime': self.runtime_namespace}
+        await self.store.put('artifact:' + identifier, blob)
+        result['artifact'] = {'id': identifier, 'expires_at': expires, 'compiler': job['compiler']}
 
     async def reap(self, board):
         for identifier, job in board['jobs'].items():
@@ -79,6 +121,7 @@ class PublicService:
             except Exception:
                 result = {'ok': False, 'error': 'Execution environment stopped. Try again.'}
             if result is not None:
+                await self.retain(board, job, result)
                 result['commit'] = self.commit
                 await self.store.put('result:' + identifier, result)
                 job['state'] = 'done'
@@ -88,10 +131,22 @@ class PublicService:
         async with self.lock:
             board = await self.board()
             owner, session = self.owner(board, token)
-            if (payload.get('mode') in {'fortran', 'both', 'compare'} | EDIT_MODES
+            await self.reap(board)
+            # Persist completed jobs/expiry cleanup even if this submission is
+            # rejected (for example, an expired retained-build identifier).
+            await self.store.put('board', board)
+            if payload.get('mode') == 'fortran-run':
+                artifact = board['artifacts'].get(payload.get('artifact_id'))
+                if not artifact or artifact['owner'] != owner:
+                    raise HTTPException(404, 'Retained build expired or not found. Compile again.')
+                blob = await self.store.get('artifact:' + payload['artifact_id'], None)
+                if blob is None:
+                    raise HTTPException(404, 'Retained build expired or not found. Compile again.')
+                payload = {**payload, 'executable': blob, 'compiler': artifact['compiler'],
+                           'compiler_options': artifact['compiler_options']}
+            if (payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
                     and payload.get('compiler', 'gfortran') not in self.compilers):
                 raise HTTPException(503, 'Selected compiler is unavailable. Choose GNU Fortran; no automatic fallback was used.')
-            await self.reap(board)
             if sum(job['state'] in {'running', 'starting'} for job in board['jobs'].values()) >= MAX_ACTIVE:
                 await self.store.put('board', board)
                 raise HTTPException(429, 'Two jobs are already running. Wait briefly and try again.')
@@ -103,9 +158,12 @@ class PublicService:
             recent.append(self.clock())
             board['daily'] += 1
             identifier = secrets.token_urlsafe(24)
+            metadata = {key: payload.get(key) for key in ('mode', 'compiler', 'compiler_options', 'retain_executable')}
+            metadata['compiler'] = payload.get('compiler', 'gfortran')
+            metadata['runtime'] = self.runtime_namespace
             # Reserve a slot and charge the allowance before provisioning.
             # A crashed provisioner cannot reset usage or bypass concurrency.
-            board['jobs'][identifier] = {'owner': owner, 'sandbox': None, 'state': 'starting', 'expires': self.clock() + 600}
+            board['jobs'][identifier] = {**metadata, 'owner': owner, 'sandbox': None, 'state': 'starting', 'expires': self.clock() + 600}
             await self.store.put('board', board)
             try:
                 sandbox = await self.runner.start(payload)
@@ -114,7 +172,7 @@ class PublicService:
                 board['jobs'][identifier]['state'] = 'done'
                 await self.store.put('board', board)
                 raise HTTPException(503, 'Could not start an execution environment. The service owner should check the Modal logs.')
-            board['jobs'][identifier] = {'owner': owner, 'sandbox': sandbox, 'state': 'running', 'expires': self.clock() + 600}
+            board['jobs'][identifier] = {**metadata, 'owner': owner, 'sandbox': sandbox, 'state': 'running', 'expires': self.clock() + 600}
             await self.store.put('board', board)
             return {'id': identifier}
 
@@ -189,11 +247,15 @@ def create_api(service):
             source, mode = payload.get('source', ''), payload.get('mode')
             compiler = payload.get('compiler', 'gfortran')
             ft_source = payload.get('fortran_source')
-            if (not isinstance(source, str) or (not source.strip() and mode != 'fortran-edit') or len(source.encode()) > MAX_SOURCE
-                    or not isinstance(mode, str) or mode not in MODES
+            if (not isinstance(mode, str) or mode not in MODES
+                    or not isinstance(source, str) or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile', 'fortran-run'}) or len(source.encode()) > MAX_SOURCE
                     or (mode in EDIT_MODES and (not isinstance(ft_source, str) or not ft_source.strip()
                         or len(ft_source.encode()) > MAX_SOURCE or payload.get('automatic', False)))
                     or not isinstance(payload.get('automatic', False), bool)
+                    or not isinstance(payload.get('retain_executable', False), bool)
+                    or (payload.get('retain_executable', False) and mode not in {'fortran-edit', 'fortran-compile'})
+                    or (mode == 'fortran-run' and (payload.get('automatic', False)
+                        or not isinstance(payload.get('artifact_id'), str) or not 1 <= len(payload['artifact_id']) <= 100))
                     or not isinstance(compiler, str) or compiler not in COMPILERS):
                 raise ValueError()
         except (ValueError, UnicodeError):
@@ -205,7 +267,8 @@ def create_api(service):
         except ValueError as error:
             raise HTTPException(400, str(error))
         return await service.submit(token, {key: payload[key] for key in
-            ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options', 'translation_options') if key in payload
+            ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options', 'translation_options',
+             'retain_executable', 'artifact_id') if key in payload
             and (key != 'fortran_source' or mode in EDIT_MODES)})
 
     @api.get('/api/jobs/{identifier}')

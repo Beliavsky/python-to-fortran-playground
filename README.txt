@@ -554,3 +554,25 @@ No submitted program is ever executed or compiled, in either mode.
 This is part of the existing playground, not a separate site. Its published
 transpiler pin is unchanged. After committing and pushing this repository,
 the existing GitHub Pages workflow tests and deploys the live-capable version.
+
+Fortran-only playground: compile and rerun
+----------------------------------------
+The separate fortran-playground frontend uses the same execution service.
+fortran-compile builds submitted Fortran without executing it. An explicit
+retain_executable request for fortran-compile or fortran-edit lets the sandbox
+export a bounded executable before running the submitted program. The API keeps
+the bytes privately and returns only an opaque session-owned build identifier.
+fortran-run retrieves that build and runs it in a fresh, network-blocked sandbox
+using its original compiler environment, without compilation or helper rebuilds.
+No executable-upload endpoint is exposed. Other sessions cannot use a build.
+
+Builds expire after at most five minutes (or session expiry), are invalidated by
+a runtime-image change, and replace the previous build for the same session.
+Limits: 4 MiB per executable, 32 retained builds globally. Expired storage is
+cleaned on subsequent API requests. No idle sandbox is retained; run-created
+files are not preserved. Existing concurrency, rate and daily limits apply to
+each compilation and rerun. Existing Python playground operations are unchanged.
+
+Redeploy with .venv-execution\Scripts\python.exe xdeploy_service.py before using
+the new buttons. Session features advertise support; old services leave the new
+frontend buttons disabled. No hosted deployment is performed by local tests.

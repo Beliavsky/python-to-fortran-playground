@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import xrun
@@ -13,6 +14,42 @@ from xprecompile import precompile
 
 
 class FortranEditTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('gfortran'), 'gfortran required')
+    def test_compile_only_and_run_without_rebuilding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            xrun.unpack_runtime(runtime)
+            ft = '''program main
+logical :: exists
+inquire(file='marker', exist=exists)
+print *, 42, exists
+open(unit=10, file='marker', status='replace')
+close(10)
+end program
+'''
+            result = xrun.execute(runtime, '', 'fortran-compile', threading.Event(),
+                                 fortran_source=ft, retain_executable=True)
+            self.assertTrue(result['ok'], result)
+            self.assertNotIn('execution', result)
+            binary = result['_artifact']
+            with patch.object(xrun, 'seed_helper_cache', side_effect=AssertionError('must not rebuild')):
+                for _ in range(2):
+                    rerun = xrun.execute(runtime, '', 'fortran-run', threading.Event(), executable=binary)
+                    self.assertTrue(rerun['ok'], rerun)
+                    self.assertEqual(rerun['execution']['stdout'].split(), ['42', 'F'])
+                    self.assertNotIn('build', rerun)
+                    self.assertTrue(rerun['reused_executable'])
+            failed = xrun.execute(runtime, '', 'fortran-compile', threading.Event(),
+                                 fortran_source='not fortran', retain_executable=True)
+            self.assertFalse(failed['ok'])
+            self.assertNotIn('_artifact', failed)
+
+    def test_invalid_retained_binary(self):
+        for binary in (None, '', 'not base64', 'a' * (xrun.MAX_EXECUTABLE * 2)):
+            result = xrun.execute(Path('.'), '', 'fortran-run', threading.Event(), executable=binary)
+            self.assertFalse(result['ok'])
+            self.assertNotIn('execution', result)
+
     def test_helper_import_detection(self):
         for source in ('use python_mod, only: mean', 'USE :: python_mod',
                        'use, non_intrinsic :: python_mod', 'use &\n & python_mod',

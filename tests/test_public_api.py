@@ -1,5 +1,6 @@
 """Exercise the public API with a fake sandbox provider; never run user code."""
 import copy
+import base64
 import json
 from pathlib import Path
 import sys
@@ -43,6 +44,71 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def retained_build(self):
+        payload = {'source': '', 'mode': 'fortran-compile', 'fortran_source': 'program main\nend',
+                   'retain_executable': True, 'compiler_options': {'preset': 'debug'}}
+        response = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        sandbox = str(len(self.runner.jobs) - 1)
+        self.runner.jobs[sandbox]['result'] = {'ok': True, 'build': {'ok': True},
+            '_artifact': base64.b64encode(b'private executable').decode()}
+        result = self.client.get('/api/jobs/' + response.json()['id'], headers=self.headers).json()['result']
+        self.assertNotIn('_artifact', result)
+        self.assertNotIn('private executable', json.dumps(result))
+        return result['artifact']
+
+    def test_compile_and_retained_run_ownership_expiry_and_payload(self):
+        features = self.client.get('/api/session', headers=self.origin).json()['features']
+        self.assertTrue(features['compile_only'])
+        artifact = self.retained_build()
+        payload = {'mode': 'fortran-run', 'artifact_id': artifact['id'], 'executable': 'forged', 'compiler': 'ifx'}
+        other = self.session()
+        self.assertEqual(self.client.post('/api/jobs', json=payload, headers=other).status_code, 404)
+        response = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        sent = self.runner.jobs['1']['payload']
+        self.assertEqual(base64.b64decode(sent['executable']), b'private executable')
+        self.assertEqual(sent['compiler'], 'gfortran')
+        self.assertEqual(sent['compiler_options'], {'preset': 'debug'})
+        self.assertEqual(self.store.data['board']['daily'], 2)
+        self.now += public.ARTIFACT_TTL + 1
+        self.assertEqual(self.client.post('/api/jobs', json=payload, headers=self.headers).status_code, 404)
+        self.assertNotIn('artifact:' + artifact['id'], self.store.data)
+
+    def test_retained_build_replacement_and_runtime_invalidation(self):
+        first = self.retained_build()
+        second = self.retained_build()
+        self.assertNotEqual(first['id'], second['id'])
+        self.assertEqual(len(self.store.data['board']['artifacts']), 1)
+        self.assertNotIn('artifact:' + first['id'], self.store.data)
+        self.service.runtime_namespace = 'new-image'
+        response = self.client.post('/api/jobs', json={'mode': 'fortran-run', 'artifact_id': second['id']}, headers=self.headers)
+        self.assertEqual(response.status_code, 404)
+
+    def test_retained_request_validation_and_private_blob_stripping(self):
+        for payload in ({'mode': []}, {'mode': {}}, {'mode': 'fortran-run'}, {'mode': 'fortran-run', 'artifact_id': []},
+                        {'mode': 'python', 'source': 'print(1)', 'retain_executable': True},
+                        {'mode': 'fortran-compile', 'fortran_source': 'end', 'retain_executable': 'yes'}):
+            self.assertEqual(self.client.post('/api/jobs', json=payload, headers=self.headers).status_code, 400)
+        response = self.submit()
+        self.runner.jobs['0']['result'] = {'ok': True, '_artifact': 'not for the browser'}
+        result = self.client.get('/api/jobs/' + response.json()['id'], headers=self.headers).json()['result']
+        self.assertNotIn('_artifact', result)
+        self.assertNotIn('artifact', result)
+
+    def test_invalid_and_failed_builds_are_not_retained(self):
+        for blob, build_ok in (('invalid base64', True), ('', True),
+                               (base64.b64encode(b'exe').decode(), False)):
+            response = self.client.post('/api/jobs', json={'mode': 'fortran-compile',
+                'fortran_source': 'end', 'retain_executable': True}, headers=self.headers)
+            self.assertEqual(response.status_code, 202, response.text)
+            sandbox = str(len(self.runner.jobs) - 1)
+            self.runner.jobs[sandbox]['result'] = {'ok': build_ok, 'build': {'ok': build_ok}, '_artifact': blob}
+            result = self.client.get('/api/jobs/' + response.json()['id'], headers=self.headers).json()['result']
+            self.assertNotIn('artifact', result)
+            self.assertNotIn('_artifact', result)
+        self.assertFalse(self.store.data['board']['artifacts'])
+
     def setUp(self):
         self.store, self.runner = MemoryStore(), Sandboxes()
         self.now = 1_700_000_000

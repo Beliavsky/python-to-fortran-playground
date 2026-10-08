@@ -144,7 +144,7 @@ class Store:
 class Sandboxes:
     async def start(self, payload):
         image_name = RUNTIME_IMAGE_NAME
-        if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit'}:
+        if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile', 'fortran-run'}:
             image_name = {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
                           'lfortran': LFORTRAN_IMAGE_NAME}.get(
                 payload.get('compiler'), RUNTIME_IMAGE_NAME)
@@ -200,7 +200,7 @@ class Sandboxes:
 def api():
     from xpublic_api import PublicService, create_api
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
-    return create_api(PublicService(Store(), Sandboxes(), manifest['commit'],
+    return create_api(PublicService(Store(), Sandboxes(), manifest['commit'], runtime_namespace=RUNTIME_IMAGE_NAME,
                                    compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
                                    + (('flang',) if FLANG_ENABLED else ())
                                    + (('lfortran',) if LFORTRAN_ENABLED else ())))
