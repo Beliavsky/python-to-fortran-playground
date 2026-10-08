@@ -268,7 +268,10 @@ before it is advertised. Use --without-ofort to skip it at deployment.
 ofort interprets standalone source only: no compiled python_mod helpers,
 compiler option presets, retained executables, or Python translation/run modes.
 The existing fortran-compile job maps to ofort --check (syntax checking only),
-and fortran-edit checks then runs source with default uninitialized-read checks.
+and fortran-edit checks then runs source with ofort --fast. Fast mode enables
+packed numeric arrays and optimized interpretation; uninitialized-read checks
+remain enabled. Its random-number sequence can differ from generic mode.
+Deployment verifies arithmetic, uninitialized reads, and a million-element array.
 Run again using the Run button; every interpretation starts a fresh process.
 The original Python playground pages are unchanged. ofort uses the same sandbox,
 resource limits, cancellation, and hosted workload allowances as compiler jobs.

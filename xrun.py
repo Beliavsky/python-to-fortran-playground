@@ -33,6 +33,7 @@ MODES = {"translate", "annotate", "format", "check", "python", "fortran", "both"
 MAX_EXECUTABLE = 4 * 1024 * 1024
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
+DEFAULT_OFORT = 'ofort --fast'
 DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
                     '--separate-compilation --legacy-array-sections --realloc-lhs-arrays')
 COMPILERS = {"gfortran", "ifx", "flang", "lfortran", "ofort"}
@@ -87,7 +88,7 @@ def compiler_command(name, default=DEFAULT_COMPILER):
     if name == "lfortran":
         return DEFAULT_LFORTRAN
     if name == 'ofort':
-        return 'ofort'
+        return DEFAULT_OFORT
     raise ValueError("Choose GNU Fortran, Intel Fortran, LLVM Flang, LFortran, or ofort.")
 
 
@@ -117,6 +118,9 @@ def detect_compiler_version(command):
 
 def compiler_version(runtime, name, command):
     """Hosted images already recorded their exact compiler during helper builds."""
+    if name == 'ofort':
+        # ofort's version-only invocation does not accept execution flags.
+        return detect_compiler_version('ofort')
     try:
         identity = json.loads((runtime / 'precompiled' / name / 'manifest.json')
                               .read_text(encoding='utf-8'))['identity']
@@ -322,7 +326,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             (job / 'input.f90').write_text(fortran_source, encoding='utf-8')
             result['build'] = run_command(['ofort', '--check', 'input.f90'], job, cancel, timeout)
             if mode == 'fortran-edit' and result['build']['ok']:
-                result['execution'] = run_command(['ofort', 'input.f90'], job, cancel, timeout)
+                result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout)
         result.update(ok=all(result[key]['ok'] for key in ('build', 'execution') if key in result)
                       and not cancel.is_set(), seconds=time.perf_counter() - started)
         return result

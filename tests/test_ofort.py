@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import xrun
 from compiler_options import user_flags
+from xverify_ofort import MILLION_SOURCE
 
 
 SOURCE = 'program main\nimplicit none\ninteger :: i\ni=42\nprint*,i\nend program main\n'
@@ -20,11 +21,14 @@ class OfortTests(unittest.TestCase):
                             compiler_name='ofort', fortran_source=SOURCE, **kwargs)
 
     def test_selection_has_no_compiler_flags(self):
-        self.assertEqual(xrun.compiler_command('ofort'), 'ofort')
+        self.assertEqual(xrun.compiler_command('ofort'), 'ofort --fast')
         self.assertEqual(user_flags('ofort'), [])
         for options in ({'preset': 'debug'}, {'warnings': True}, {'fast_math': True}, {'standard': '2008'}):
             with self.assertRaises(ValueError):
                 user_flags('ofort', options)
+        with patch('xrun.detect_compiler_version', return_value='ofort test') as version:
+            self.assertEqual(xrun.compiler_version(Path('/unused'), 'ofort', xrun.DEFAULT_OFORT), 'ofort test')
+            version.assert_called_once_with('ofort')
 
     def test_check_does_not_execute_or_link_helpers(self):
         stage = {'ok': True, 'stdout': 'ofort check passed', 'stderr': '', 'seconds': 0.1}
@@ -45,6 +49,24 @@ class OfortTests(unittest.TestCase):
             with patch('xrun.shutil.which', return_value=None):
                 self.assertIn('unavailable', self.execute()['error'])
             run.assert_not_called()
+
+    def test_execution_always_uses_fast_mode(self):
+        with patch('xrun.shutil.which', return_value='ofort'), \
+             patch('xrun.detect_compiler_version', return_value='ofort test'), \
+             patch('xrun.run_command', return_value={'ok': True}) as run:
+            self.assertTrue(self.execute()['ok'])
+            self.assertEqual([call.args[0] for call in run.call_args_list],
+                             [['ofort', '--check', 'input.f90'], ['ofort', '--fast', 'input.f90']])
+
+    @unittest.skipUnless(shutil.which('ofort'), 'ofort required')
+    def test_million_element_random_array(self):
+        result = xrun.execute(Path('/unused'), '', 'fortran-edit', threading.Event(),
+                             compiler_name='ofort', fortran_source=MILLION_SOURCE)
+        self.assertTrue(result['ok'], result)
+        values = result['execution']['stdout'].split()
+        self.assertEqual(len(values), 5)
+        self.assertEqual(values[0], '1000000')
+        self.assertTrue(all(0 <= float(value) <= 1 for value in values[1:]))
 
     @unittest.skipUnless(shutil.which('ofort'), 'ofort required')
     def test_execution_and_uninitialized_read(self):
