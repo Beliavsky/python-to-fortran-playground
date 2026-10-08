@@ -264,9 +264,18 @@ LFortran uses an independent Conda image with conda-forge's Linux package
 lfortran=0.66.0=hd7e4fe6_4, installed using Modal's micromamba support.
 It is alpha software, not a promise that every translated program works.
 Both helper sources are unchanged. Its fixed server-side compiler options are:
-  lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections
+  lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections --realloc-lhs-arrays
 The first two options bound noisy diagnostics; --implicit-interface and
 --legacy-array-sections support legacy LAPACK calls and sequence association.
+--realloc-lhs-arrays enables standard Fortran allocation/reallocation on
+intrinsic assignment and is enabled by default. Known compiler caveat:
+Windows LFortran 0.66.0
+allocated and resized a vector correctly but sometimes produced incorrect,
+varying results instead of 41 51 for the subsequent self-assignment
+v = v + 1. Repeated runs of the same executable both passed and failed.
+The reproducer is tests/cases/lfortran_realloc_lhs.f90.
+Linux behavior has not been checked for this reproducer. An upstream report
+draft with reproduction instructions is tests/cases/lfortran_realloc_issue.txt.
 --separate-compilation is essential: otherwise compiling python.f90 produces
 a module file and a stub object, not the helper implementations needed to link.
 The image precompiles both helpers and must pass the same arithmetic, NumPy,

@@ -106,6 +106,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(xrun.compiler_command('lfortran'), xrun.DEFAULT_LFORTRAN)
         self.assertIn('--separate-compilation', xrun.DEFAULT_LFORTRAN)
         self.assertIn('--legacy-array-sections', xrun.DEFAULT_LFORTRAN)
+        self.assertIn('--realloc-lhs-arrays', xrun.DEFAULT_LFORTRAN)
         with patch('xrun.shutil.which', return_value=None), patch('xrun.run_command') as run:
             result = xrun.execute(self.runtime, 'print(1)', 'fortran', threading.Event(), compiler_name='lfortran')
             self.assertFalse(result['ok'])

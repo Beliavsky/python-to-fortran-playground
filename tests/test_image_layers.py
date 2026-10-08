@@ -43,6 +43,13 @@ def definitions(changed=None):
 
 
 class LayerTests(unittest.TestCase):
+    def test_lfortran_helpers_use_the_execution_defaults(self):
+        import xrun
+        events = definitions()['lfortran_job_image'].events
+        build = next(event for event in events
+                     if event[0] == 'run_commands' and 'xbuild_helpers.py' in str(event[1]))
+        self.assertIn(xrun.DEFAULT_LFORTRAN, str(build[1]))
+
     def test_application_edits_do_not_invalidate_toolchains_or_helper_builds(self):
         original = definitions()
         changed = definitions('xrun.py')

@@ -102,7 +102,7 @@ flang_job_image = application_image(helper_image(flang_installed_image, 'flang',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
 lfortran_job_image = application_image(helper_image(lfortran_installed_image, 'lfortran',
-    'lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections')).run_commands(
+    'lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections --realloc-lhs-arrays')).run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py lfortran --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py --compiler lfortran')
 

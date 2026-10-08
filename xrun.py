@@ -34,7 +34,7 @@ MAX_EXECUTABLE = 4 * 1024 * 1024
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
-                    '--separate-compilation --legacy-array-sections')
+                    '--separate-compilation --legacy-array-sections --realloc-lhs-arrays')
 COMPILERS = {"gfortran", "ifx", "flang", "lfortran"}
 
 

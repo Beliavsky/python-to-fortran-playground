@@ -1,0 +1,49 @@
+Upstream issue draft (not submitted)
+
+Title: --realloc-lhs-arrays gives intermittent wrong results for v = v + 1
+
+Environment tested:
+Windows, LFortran 0.66.0, LLVM 21.1.7,
+default target x86_64-pc-windows-msvc, initialized VS 2022 BuildTools.
+Linux and newer LFortran versions have not been tested.
+
+Reproducer: lfortran_realloc_lhs.f90 in this directory.
+No external libraries or helper modules are needed.
+
+Commands (run from an initialized MSVC command prompt):
+  lfortran --version
+  lfortran --realloc-lhs-arrays lfortran_realloc_lhs.f90 -o repro.exe
+  repro.exe
+  repro.exe
+  repro.exe
+
+Expected output (ignoring whitespace):
+  10 20 30
+  3
+  40 50
+  2
+  41 51
+
+Observed on October 8, 2026: compilation and execution exit successfully.
+Initial allocation and resizing are correct, but the final self-assignment
+sometimes fails. Three consecutive executions of the same binary printed:
+  1 1
+  41 51
+  7471105 6029434
+for the final vector. Other runs have printed 1 51 or other incorrect values.
+
+The same failure occurs with our full playground flags:
+  lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections --realloc-lhs-arrays lfortran_realloc_lhs.f90 -o repro.exe
+
+GNU control (verified correct):
+  gfortran -std=f2018 -fcheck=all lfortran_realloc_lhs.f90 -o gnu.exe
+  gnu.exe
+
+The varying results suggest an invalid memory access or prematurely released
+RHS storage, but that is an inference, not a diagnosed compiler cause.
+
+Issue tracker: https://github.com/lfortran/lfortran/issues
+A search for realloc/self-assignment and realloc/wrong-result reports found
+related issues, but no exact match was established. In particular #12970
+concerns derived-type self-assignment, not this plain integer vector case.
+Before filing, check for a duplicate and attach the source and version output.
