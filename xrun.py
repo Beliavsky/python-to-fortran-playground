@@ -324,8 +324,9 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         with tempfile.TemporaryDirectory(prefix='p2f_ofort_') as directory:
             job = Path(directory)
             (job / 'input.f90').write_text(fortran_source, encoding='utf-8')
-            result['build'] = run_command(['ofort', '--check', 'input.f90'], job, cancel, timeout)
-            if mode == 'fortran-edit' and result['build']['ok']:
+            if mode == 'fortran-compile':
+                result['build'] = run_command(shlex.split(DEFAULT_OFORT) + ['--check', 'input.f90'], job, cancel, timeout)
+            else:
                 result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout)
         result.update(ok=all(result[key]['ok'] for key in ('build', 'execution') if key in result)
                       and not cancel.is_set(), seconds=time.perf_counter() - started)
