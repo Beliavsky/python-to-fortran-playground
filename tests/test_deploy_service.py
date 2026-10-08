@@ -13,7 +13,7 @@ import xdeploy_service
 
 class DeploymentTests(unittest.TestCase):
     def deploy(self, args=(), intel_error=None, gnu_error=None, flang_error=None, lfortran_error=None,
-               version_error=None):
+               version_error=None, ofort_error=None):
         gnu, intel, flang, lfortran = Mock(), Mock(), Mock(), Mock()
         gnu.build.return_value = gnu
         intel.build.return_value = intel
@@ -24,11 +24,14 @@ class DeploymentTests(unittest.TestCase):
         flang.build.side_effect = flang_error
         lfortran.build.side_effect = lfortran_error
         definitions = SimpleNamespace(ROOT=Path('/repo'), RUNTIME_IMAGE_NAME='gnu-image',
+            OFORT_IMAGE_NAME='ofort-image', ofort_job_image=Mock(),
             TOOLS_IMAGE_NAME='tools-image', tools_job_image=Mock(),
             INTEL_IMAGE_NAME='intel-image', FLANG_IMAGE_NAME='flang-image',
             LFORTRAN_IMAGE_NAME='lfortran-image', job_image=gnu, intel_job_image=intel,
             flang_job_image=flang, lfortran_job_image=lfortran)
         definitions.tools_job_image.build.return_value = definitions.tools_job_image
+        definitions.ofort_job_image.build.return_value = definitions.ofort_job_image
+        definitions.ofort_job_image.build.side_effect = ofort_error
         with patch.dict(sys.modules, {'xmodal': definitions}), \
                 patch.object(sys, 'argv', ['xdeploy_service.py', *args]), \
                 patch.object(xdeploy_service.modal.App, 'lookup'), \
@@ -40,6 +43,10 @@ class DeploymentTests(unittest.TestCase):
                                        'P2F_LFORTRAN_ENABLED': 'unexpected'}):
             xdeploy_service.main()
         definitions.tools_job_image.publish.assert_called_once_with('tools-image')
+        if '--without-ofort' in args:
+            definitions.ofort_job_image.build.assert_not_called()
+        elif not ofort_error and not gnu_error:
+            definitions.ofort_job_image.publish.assert_called_once_with('ofort-image')
         return gnu, intel, flang, lfortran, deploy
 
     def test_success_enables_intel_only_after_build_and_publish(self):
@@ -52,9 +59,32 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_FLANG_ENABLED'], '1')
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_LFORTRAN_ENABLED'], '1')
         self.assertEqual(json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_VERSIONS']),
-                         {name: name + ' version 1' for name in ('gfortran', 'ifx', 'flang', 'lfortran')})
+                         {name: name + ' version 1' for name in ('gfortran', 'ifx', 'flang', 'lfortran', 'ofort')})
         self.assertEqual(json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_STANDARDS']),
-                         {name: {'2008': ['verified-flag']} for name in ('gfortran', 'ifx', 'flang', 'lfortran')})
+                         {name: {'2008': ['verified-flag']} for name in ('gfortran', 'ifx', 'flang', 'lfortran', 'ofort')})
+        self.assertEqual(deploy.call_args.kwargs['env']['P2F_OFORT_ENABLED'], '1')
+
+    def test_ofort_failure_does_not_disable_compilers(self):
+        _, _, _, _, deploy = self.deploy(ofort_error=RuntimeError('ofort failed'))
+        self.assertEqual(deploy.call_args.kwargs['env']['P2F_OFORT_ENABLED'], '0')
+        self.assertEqual(deploy.call_args.kwargs['env']['P2F_LFORTRAN_ENABLED'], '1')
+        self.assertNotIn('ofort', json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_VERSIONS']))
+
+    def test_without_ofort_skips_interpreter_only(self):
+        _, _, _, _, deploy = self.deploy(('--without-ofort',))
+        self.assertEqual(deploy.call_args.kwargs['env']['P2F_OFORT_ENABLED'], '0')
+        self.assertEqual(deploy.call_args.kwargs['env']['P2F_LFORTRAN_ENABLED'], '1')
+
+    def test_ofort_metadata_uses_interpreter_not_helper_manifest(self):
+        sandbox = Mock(returncode=0)
+        sandbox.stdout.read.return_value = json.dumps({'version': 'ofort 0.1.0 (commit abc)', 'standards': {}})
+        with patch.object(xdeploy_service.modal.Sandbox, 'create', return_value=sandbox) as create, \
+                patch.object(xdeploy_service.modal.Image, 'from_name'):
+            result = xdeploy_service.read_image_metadata(Mock(), 'ofort-image', 'ofort')
+        self.assertEqual(result['version'], 'ofort 0.1.0 (commit abc)')
+        self.assertNotIn('manifest.json', create.call_args.args[2])
+        self.assertIn('--version', create.call_args.args[2])
+        sandbox.terminate.assert_called_once()
 
     def test_intel_failure_keeps_gnu_available(self):
         gnu, intel, flang, _, deploy = self.deploy(intel_error=RuntimeError('Intel installation failed'))

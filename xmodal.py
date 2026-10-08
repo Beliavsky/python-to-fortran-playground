@@ -23,7 +23,7 @@ def runtime_image_name():
     for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py',
                      'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xbuild_helpers.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
-                     'xverify_flang.py', 'upstream.json',
+                     'xverify_flang.py', 'xinstall_ofort.sh', 'xverify_ofort.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
         digest.update((ROOT / filename).read_bytes())
     return 'p2f-runtime-' + digest.hexdigest()[:20]
@@ -36,6 +36,8 @@ FLANG_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-flang'
 FLANG_ENABLED = os.environ.get('P2F_FLANG_ENABLED') == '1'
 LFORTRAN_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-lfortran'
 LFORTRAN_ENABLED = os.environ.get('P2F_LFORTRAN_ENABLED') == '1'
+OFORT_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-ofort'
+OFORT_ENABLED = os.environ.get('P2F_OFORT_ENABLED') == '1'
 TOOLS_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-tools'
 
 # Nothing from the application, formatter, linter, or upstream bundle belongs
@@ -110,6 +112,15 @@ lfortran_job_image = application_image(helper_image(lfortran_installed_image, 'l
 tools_job_image = application_image(modal.Image.debian_slim(python_version='3.12')
     .pip_install('fprettify==0.3.7', 'fortitude-lint==0.9.2'), source_tools=True)
 
+# Independent interpreter installation: no Fortran toolchain or helper objects.
+ofort_installed_image = (modal.Image.debian_slim(python_version='3.12')
+    .apt_install('gcc', 'git', 'ca-certificates')
+    .add_local_file(ROOT / 'xinstall_ofort.sh', '/opt/p2f/xinstall_ofort.sh', copy=True)
+    .run_commands('bash /opt/p2f/xinstall_ofort.sh'))
+ofort_job_image = (application_image(ofort_installed_image)
+    .add_local_file(ROOT / 'xverify_ofort.py', '/opt/p2f/xverify_ofort.py', copy=True)
+    .run_commands('python /opt/p2f/xverify_ofort.py'))
+
 api_image = (
     modal.Image.debian_slim(python_version='3.12')
     .pip_install('fastapi==0.142.2')
@@ -117,6 +128,7 @@ api_image = (
           'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0',
           'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0',
           'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0',
+          'P2F_OFORT_ENABLED': '1' if OFORT_ENABLED else '0',
           'P2F_COMPILER_VERSIONS': os.environ.get('P2F_COMPILER_VERSIONS', '{}'),
           'P2F_COMPILER_STANDARDS': os.environ.get('P2F_COMPILER_STANDARDS', '{}')})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
@@ -143,7 +155,7 @@ def job_image_name(payload):
         return TOOLS_IMAGE_NAME
     if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile', 'fortran-run'}:
         return {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
-                'lfortran': LFORTRAN_IMAGE_NAME}.get(payload.get('compiler'), RUNTIME_IMAGE_NAME)
+                'lfortran': LFORTRAN_IMAGE_NAME, 'ofort': OFORT_IMAGE_NAME}.get(payload.get('compiler'), RUNTIME_IMAGE_NAME)
     return RUNTIME_IMAGE_NAME
 
 
@@ -207,4 +219,5 @@ def api():
                                    compiler_standards=json.loads(os.environ.get('P2F_COMPILER_STANDARDS', '{}')),
                                    compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
                                    + (('flang',) if FLANG_ENABLED else ())
-                                   + (('lfortran',) if LFORTRAN_ENABLED else ())))
+                                   + (('lfortran',) if LFORTRAN_ENABLED else ())
+                                   + (('ofort',) if OFORT_ENABLED else ())))

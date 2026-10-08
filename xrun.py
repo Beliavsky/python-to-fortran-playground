@@ -35,7 +35,7 @@ MAX_EXECUTABLE = 4 * 1024 * 1024
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
                     '--separate-compilation --legacy-array-sections --realloc-lhs-arrays')
-COMPILERS = {"gfortran", "ifx", "flang", "lfortran"}
+COMPILERS = {"gfortran", "ifx", "flang", "lfortran", "ofort"}
 
 
 def helper_identity(runtime, command):
@@ -86,12 +86,14 @@ def compiler_command(name, default=DEFAULT_COMPILER):
         return next((exe for exe in ('flang-21', 'flang', 'flang-new') if shutil.which(exe)), 'flang-21')
     if name == "lfortran":
         return DEFAULT_LFORTRAN
-    raise ValueError("Choose GNU Fortran, Intel Fortran, LLVM Flang, or LFortran.")
+    if name == 'ofort':
+        return 'ofort'
+    raise ValueError("Choose GNU Fortran, Intel Fortran, LLVM Flang, LFortran, or ofort.")
 
 
 def available_compilers(default=DEFAULT_COMPILER):
     available = []
-    for name in ("gfortran", "ifx", "flang", "lfortran"):
+    for name in ("gfortran", "ifx", "flang", "lfortran", "ofort"):
         if shutil.which(shlex.split(compiler_command(name, default))[0]):
             available.append(name)
     return available
@@ -304,6 +306,25 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         else:
             result['error'] = stage['stderr'] or 'Formatting failed or exceeded the output limit; source was not changed.'
         result['seconds'] = time.perf_counter() - started
+        return result
+    if compiler_name == 'ofort' and mode not in {'translate', 'annotate', 'python'}:
+        if mode not in {'fortran-edit', 'fortran-compile'} or automatic:
+            return {**result, 'error': 'ofort supports explicit standalone Fortran syntax checks and runs only.'}
+        user_flags('ofort', compiler_options)
+        if not isinstance(fortran_source, str) or not fortran_source.strip() or len(fortran_source.encode('utf-8')) > MAX_SOURCE:
+            return {**result, 'error': 'Enter up to 100 KB of standalone Fortran.'}
+        if not shutil.which('ofort'):
+            return {**result, 'error': 'ofort is unavailable; no compiler fallback was used.'}
+        result.update(fortran=fortran_source, interpreter=True,
+                      compiler_version=detect_compiler_version('ofort'))
+        with tempfile.TemporaryDirectory(prefix='p2f_ofort_') as directory:
+            job = Path(directory)
+            (job / 'input.f90').write_text(fortran_source, encoding='utf-8')
+            result['build'] = run_command(['ofort', '--check', 'input.f90'], job, cancel, timeout)
+            if mode == 'fortran-edit' and result['build']['ok']:
+                result['execution'] = run_command(['ofort', 'input.f90'], job, cancel, timeout)
+        result.update(ok=all(result[key]['ok'] for key in ('build', 'execution') if key in result)
+                      and not cancel.is_set(), seconds=time.perf_counter() - started)
         return result
     command_text = compiler_command(compiler_name, compiler)
     if mode in COMPILE_MODES or mode == 'fortran-run':

@@ -43,6 +43,17 @@ def definitions(changed=None):
 
 
 class LayerTests(unittest.TestCase):
+    def test_ofort_has_no_compiled_helper_dependency(self):
+        images = definitions()
+        events = str(images['ofort_job_image'].events)
+        self.assertNotIn('xbuild_helpers.py', events)
+        self.assertNotIn('upstream.zip', events)
+        self.assertNotIn('xprecompile.py ofort', events)
+        self.assertIn('xverify_ofort.py', events)
+        for mode in ('fortran-edit', 'fortran-compile'):
+            self.assertEqual(images['job_image_name']({'mode': mode, 'compiler': 'ofort'}), images['OFORT_IMAGE_NAME'])
+        self.assertEqual(images['ofort_installed_image'].events,
+                         definitions('xrun.py')['ofort_installed_image'].events)
     def test_lfortran_helpers_use_the_execution_defaults(self):
         import xrun
         events = definitions()['lfortran_job_image'].events

@@ -30,7 +30,7 @@ MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 MODES = {'translate', 'annotate', 'format', 'check', 'python', 'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
-COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran'}
+COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran', 'ofort'}
 
 
 class PublicService:
@@ -158,6 +158,9 @@ class PublicService:
                 raise HTTPException(503, 'Selected compiler is unavailable. Choose GNU Fortran; no automatic fallback was used.')
             try:
                 name = payload.get('compiler', 'gfortran')
+                if name == 'ofort' and (payload.get('mode') not in {'fortran-edit', 'fortran-compile', 'format', 'check'}
+                        or payload.get('retain_executable', False) or payload.get('automatic', False)):
+                    raise ValueError('ofort supports standalone Fortran checks/runs only, without retained executables.')
                 user_flags(name, payload.get('compiler_options'), standards=self.compiler_catalog()[name]['standards'])
             except ValueError as error:
                 raise HTTPException(400, str(error)) from error

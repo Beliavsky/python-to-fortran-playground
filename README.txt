@@ -260,6 +260,19 @@ To require Flang in hosted validation:
 Validation uses three GNU jobs plus three jobs for each advertised optional
 compiler (twelve jobs when all four compilers are available).
 
+ofort is an optional interpreter backend for the standalone Fortran playground.
+Its source is pinned to commit 77301d0ca14680b38121fbc87b8dd2292f44bea9 and
+built in an independent image. Installation layers do not depend on application
+or helper changes. The image must pass arithmetic and uninitialized-read tests
+before it is advertised. Use --without-ofort to skip it at deployment.
+ofort interprets standalone source only: no compiled python_mod helpers,
+compiler option presets, retained executables, or Python translation/run modes.
+The existing fortran-compile job maps to ofort --check (syntax checking only),
+and fortran-edit checks then runs source with default uninitialized-read checks.
+Run again using the Run button; every interpretation starts a fresh process.
+The original Python playground pages are unchanged. ofort uses the same sandbox,
+resource limits, cancellation, and hosted workload allowances as compiler jobs.
+
 LFortran uses an independent Conda image with conda-forge's Linux package
 lfortran=0.66.0=hd7e4fe6_4, installed using Modal's micromamba support.
 It is alpha software, not a promise that every translated program works.

@@ -14,6 +14,10 @@ def read_image_metadata(build_app, image_name, compiler):
     script = ("import json; from pathlib import Path; "
               f"data=json.loads(Path('/opt/p2f/runtime/precompiled/{compiler}/manifest.json').read_text()); "
               "print(json.dumps({'version':data['identity']['version'],'standards':data.get('standards',{})}))")
+    if compiler == 'ofort':
+        script = ("import json, subprocess; "
+                  "version=subprocess.check_output(['ofort','--version'],text=True); "
+                  "print(json.dumps({'version':version,'standards':{}}))")
     sandbox = modal.Sandbox.create('python', '-c', script, app=build_app,
         image=modal.Image.from_name(image_name), timeout=30, cpu=0.125, memory=256,
         block_network=True, secrets=[], volumes={}, include_oidc_identity_token=False)
@@ -34,14 +38,16 @@ def main():
     parser.add_argument('--without-intel', action='store_true', help='Skip the optional Intel image')
     parser.add_argument('--without-flang', action='store_true', help='Skip the optional LLVM Flang image')
     parser.add_argument('--without-lfortran', action='store_true', help='Skip the optional LFortran image')
+    parser.add_argument('--without-ofort', action='store_true', help='Skip the optional ofort interpreter image')
     args = parser.parse_args()
     from xmodal import (ROOT, RUNTIME_IMAGE_NAME, INTEL_IMAGE_NAME, FLANG_IMAGE_NAME,
                         LFORTRAN_IMAGE_NAME, job_image, intel_job_image, flang_job_image,
-                        lfortran_job_image, TOOLS_IMAGE_NAME, tools_job_image)
+                        lfortran_job_image, TOOLS_IMAGE_NAME, tools_job_image, OFORT_IMAGE_NAME, ofort_job_image)
     build_app = modal.App.lookup('p2f-playground-execution', create_if_missing=True)
     intel_enabled = False
     flang_enabled = False
     lfortran_enabled = False
+    ofort_enabled = False
     with modal.enable_output():
         tools_job_image.build(build_app).publish(TOOLS_IMAGE_NAME)
         job_image.build(build_app).publish(RUNTIME_IMAGE_NAME)
@@ -66,10 +72,17 @@ def main():
             except Exception as error:
                 print(f'WARNING: LFortran image could not be built/verified: {error}', flush=True)
                 print('LFortran will be marked unavailable; other compilers are unchanged.', flush=True)
+        if not args.without_ofort:
+            try:
+                ofort_job_image.build(build_app).publish(OFORT_IMAGE_NAME)
+                ofort_enabled = True
+            except Exception as error:
+                print(f'WARNING: ofort image could not be built/verified: {error}', flush=True)
+                print('ofort will be marked unavailable; compilers are unchanged.', flush=True)
     versions, standards = {}, {}
     for compiler, image_name, enabled in [('gfortran', RUNTIME_IMAGE_NAME, True),
             ('ifx', INTEL_IMAGE_NAME, intel_enabled), ('flang', FLANG_IMAGE_NAME, flang_enabled),
-            ('lfortran', LFORTRAN_IMAGE_NAME, lfortran_enabled)]:
+            ('lfortran', LFORTRAN_IMAGE_NAME, lfortran_enabled), ('ofort', OFORT_IMAGE_NAME, ofort_enabled)]:
         if enabled:
             try:
                 metadata = read_image_metadata(build_app, image_name, compiler)
@@ -82,6 +95,7 @@ def main():
            'P2F_INTEL_ENABLED': '1' if intel_enabled else '0',
            'P2F_FLANG_ENABLED': '1' if flang_enabled else '0',
            'P2F_LFORTRAN_ENABLED': '1' if lfortran_enabled else '0'}
+    env['P2F_OFORT_ENABLED'] = '1' if ofort_enabled else '0'
     subprocess.run([sys.executable, '-X', 'utf8', '-m', 'modal', 'deploy',
                     str(ROOT / 'xmodal.py')], cwd=ROOT, env=env, check=True)
 

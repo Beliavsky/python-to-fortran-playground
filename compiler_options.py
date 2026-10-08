@@ -1,5 +1,11 @@
 """Server-owned, ABI-compatible user-code options; never accept raw flags."""
 OPTIONS = {
+    'ofort': {
+        'presets': {'default': []}, 'extras': {}, 'standards': {},
+        'standard_note': 'ofort interprets a Fortran subset; no standard selection is offered.',
+        'note': 'Experimental interpreter. Standalone source only; no compiled python_mod helpers.',
+        'interpreter': True,
+    },
     'gfortran': {
         'presets': {'default': [], 'debug': ['-O0', '-g', '-fcheck=all', '-fbacktrace'],
                     'optimized': ['-O3'], 'strict': ['-pedantic', '-Wall', '-Wextra']},

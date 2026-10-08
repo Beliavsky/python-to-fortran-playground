@@ -44,6 +44,16 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_ofort_is_standalone_only_and_never_retains_a_binary(self):
+        self.service.compilers = ('gfortran', 'ofort')
+        payload = {'source': '', 'fortran_source': 'program main\nend program main\n',
+                   'mode': 'fortran-edit', 'compiler': 'ofort'}
+        for extras in ({'retain_executable': True}, {'mode': 'both-edit'}, {'automatic': True}):
+            response = self.client.post('/api/jobs', json={**payload, **extras}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        response = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertNotIn('retain_executable', self.runner.jobs['0']['payload'])
     def test_checking_is_explicit_and_never_retains_an_executable(self):
         self.assertTrue(self.client.get('/api/session', headers=self.origin).json()['features']['check'])
         for extras in ({'automatic': True}, {'retain_executable': True}, {'source': ''}):
