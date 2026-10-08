@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 
-from xrun import compiler_command, helper_identity, execute
+from xrun import compiler_command, helper_identity, execute, probe_standards
 from compiler_options import OPTIONS
 
 
@@ -36,7 +36,8 @@ def precompile(runtime, name):
             shutil.copyfile(path, cache / path.name)
             artifacts[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
         (cache / 'manifest.json').write_text(
-            json.dumps({'identity': identity, 'artifacts': artifacts}, indent=2) + '\n',
+            json.dumps({'identity': identity, 'artifacts': artifacts,
+                        'standards': probe_standards(command, name)}, indent=2) + '\n',
             encoding='utf-8')
     print(f'Precompiled helpers: {name}', flush=True)
 
@@ -54,6 +55,9 @@ def verify_options(runtime, compiler):
     """Reject an optional image if advertised user flags fail with cached helpers."""
     selections = [{'preset': preset} for preset in OPTIONS[compiler]['presets']]
     selections += [{key: True} for key in OPTIONS[compiler]['extras']]
+    manifest_path = runtime / 'precompiled' / compiler / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    standards = manifest.get('standards', {})
     ft = '''program option_check
 use, intrinsic :: iso_fortran_env, only: real64
 use python_mod, only: mean
@@ -70,6 +74,27 @@ end program option_check
                 or float(result['execution']['stdout']) != 2.0):
             raise RuntimeError(f'{compiler} option verification failed: {selection}: {result}')
         print(f'{compiler} user options {selection}: PASS', flush=True)
+    # A Fortran-95-compatible caller can still use modern precompiled helpers.
+    standard_source = '''program standard_check
+use python_mod, only: mean
+implicit none
+real(kind(1.0d0)) :: x(3) = (/ 1.0d0, 2.0d0, 3.0d0 /)
+print *, mean(x)
+end program standard_check
+'''
+    verified = {}
+    for year, flags in standards.items():
+        result = execute(runtime, '', 'fortran-edit', threading.Event(), compiler_name=compiler,
+                         compiler_options={'standard': year}, fortran_source=standard_source)
+        if (result['ok'] and result.get('precompiled_helpers')
+                and 'Build helper:' not in result['build']['stdout']
+                and float(result['execution']['stdout']) == 2.0):
+            verified[year] = flags
+            print(f'{compiler} Fortran {year} with cached helpers: PASS', flush=True)
+        else:
+            print(f'{compiler} Fortran {year}: not advertised (verification failed)', flush=True)
+    manifest['standards'] = verified
+    manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
 
 if __name__ == '__main__':

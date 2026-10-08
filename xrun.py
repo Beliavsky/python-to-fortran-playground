@@ -3,10 +3,12 @@ import argparse
 import base64
 import codeop
 from dataclasses import dataclass, field
+from functools import lru_cache
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shlex
@@ -92,6 +94,74 @@ def available_compilers(default=DEFAULT_COMPILER):
         if shutil.which(shlex.split(compiler_command(name, default))[0]):
             available.append(name)
     return available
+
+
+def version_banner(text):
+    """Display the first nonempty banner line, not copyright/build details."""
+    return next((line.strip()[:1000] for line in text.splitlines() if line.strip()), None)
+
+
+@lru_cache(maxsize=16)
+def detect_compiler_version(command):
+    """Local fallback: probe each trusted command once, never browser flags."""
+    try:
+        result = subprocess.run(shlex.split(command) + ['--version'], capture_output=True,
+                                text=True, check=True, timeout=15)
+        return version_banner(result.stdout + '\n' + result.stderr)
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return None
+
+
+def compiler_version(runtime, name, command):
+    """Hosted images already recorded their exact compiler during helper builds."""
+    try:
+        identity = json.loads((runtime / 'precompiled' / name / 'manifest.json')
+                              .read_text(encoding='utf-8'))['identity']
+        if identity['command'] == command and isinstance(identity['version'], str):
+            return version_banner(identity['version'])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return detect_compiler_version(command)
+
+
+@lru_cache(maxsize=16)
+def probe_standards(command, compiler):
+    """Verify trusted candidate flags once; reject silently ignored options."""
+    supported = {}
+    if not OPTIONS[compiler]['standards']:
+        return supported
+    with tempfile.TemporaryDirectory(prefix='p2f_standard_probe_') as directory:
+        path = Path(directory)
+        (path / 'probe.f90').write_text('program probe\nimplicit none\nend program probe\n', encoding='utf-8')
+        for year, flags in OPTIONS[compiler]['standards'].items():
+            try:
+                result = subprocess.run(shlex.split(command) + flags + ['-c', 'probe.f90', '-o', 'probe.o'],
+                    cwd=path, capture_output=True, text=True, timeout=15,
+                    env={**os.environ, 'LC_ALL': 'C', 'LANG': 'C'})
+                output = result.stdout + '\n' + result.stderr
+                ignored = re.search(r'(?:unknown|unrecognized|unsupported|not supported|ignoring|unused)[^\n]*(?:option|argument)'
+                                    r'|(?:option|argument)[^\n]*(?:unknown|unrecognized|unsupported|not supported|ignored|unused)', output, re.I)
+                if result.returncode == 0 and not ignored:
+                    supported[year] = list(flags)
+            except (OSError, UnicodeError, subprocess.SubprocessError):
+                pass
+    return supported
+
+
+def runtime_standards(runtime, name, command):
+    try:
+        manifest = json.loads((runtime / 'precompiled' / name / 'manifest.json').read_text(encoding='utf-8'))
+        if manifest['identity']['command'] == command and isinstance(manifest.get('standards'), dict):
+            return {year: list(flags) for year, flags in OPTIONS[name]['standards'].items()
+                    if manifest['standards'].get(year) == flags}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return probe_standards(command, name)
+
+
+def compiler_catalog(runtime, names, default=DEFAULT_COMPILER):
+    return {name: {**OPTIONS[name], 'standards': runtime_standards(runtime, name, compiler_command(name, default))}
+            for name in names}
 
 
 def unpack_runtime(destination):
@@ -203,7 +273,11 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
     command_text = compiler_command(compiler_name, compiler)
-    flags = user_flags(compiler_name, compiler_options)
+    if mode in COMPILE_MODES or mode == 'fortran-run':
+        result['compiler_version'] = compiler_version(runtime, compiler_name, command_text)
+    selected_standard = (compiler_options or {}).get('standard', 'default') if isinstance(compiler_options, dict) else 'default'
+    flags = user_flags(compiler_name, compiler_options, standards=runtime_standards(runtime, compiler_name, command_text)
+                       if selected_standard != 'default' else None)
     settings = validate_options(translation_options)
     result['compiler_options'] = compiler_options or {'preset': 'default'}
     result['translation_options'] = settings if mode not in EDIT_MODES else None
@@ -382,9 +456,12 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.allowed():
             return
         if self.path == "/api/session":
+            compilers = available_compilers(self.server.compiler)
             self.reply(200, {"token": self.server.token, "commit": self.server.manifest["commit"],
                              "timeout": self.server.timeout, "compiler": self.server.compiler,
-                             "compilers": available_compilers(self.server.compiler), 'compiler_options': OPTIONS,
+                             "compilers": compilers, 'compiler_options': compiler_catalog(self.server.runtime, compilers, self.server.compiler),
+                             'compiler_versions': {name: compiler_version(self.server.runtime, name,
+                                 compiler_command(name, self.server.compiler)) for name in compilers},
                              'source_tools': True})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):

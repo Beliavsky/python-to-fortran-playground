@@ -203,6 +203,7 @@ class ExecutionTests(unittest.TestCase):
             with request("/api/session") as response:
                 session = json.load(response)
             self.assertIn('debug', session['compiler_options']['gfortran']['presets'])
+            self.assertIn('compiler_versions', session)
             for headers in ({"Origin": "https://evil.invalid"}, {"Host": "evil.invalid"}):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     request("/api/session", headers=headers)

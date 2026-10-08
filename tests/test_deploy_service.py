@@ -1,5 +1,6 @@
 """Deployment orchestration without real Modal calls or account credentials."""
 from contextlib import nullcontext
+import json
 import os
 from pathlib import Path
 import sys
@@ -11,7 +12,8 @@ import xdeploy_service
 
 
 class DeploymentTests(unittest.TestCase):
-    def deploy(self, args=(), intel_error=None, gnu_error=None, flang_error=None, lfortran_error=None):
+    def deploy(self, args=(), intel_error=None, gnu_error=None, flang_error=None, lfortran_error=None,
+               version_error=None):
         gnu, intel, flang, lfortran = Mock(), Mock(), Mock(), Mock()
         gnu.build.return_value = gnu
         intel.build.return_value = intel
@@ -30,6 +32,8 @@ class DeploymentTests(unittest.TestCase):
                 patch.object(xdeploy_service.modal.App, 'lookup'), \
                 patch.object(xdeploy_service.modal, 'enable_output', return_value=nullcontext()), \
                 patch.object(xdeploy_service.subprocess, 'run') as deploy, \
+                patch.object(xdeploy_service, 'read_image_metadata', side_effect=version_error or (lambda app, image, compiler:
+                    {'version': compiler + ' version 1', 'standards': {'2008': ['verified-flag']}})), \
                 patch.dict(os.environ, {'P2F_INTEL_ENABLED': 'unexpected', 'P2F_FLANG_ENABLED': 'unexpected',
                                        'P2F_LFORTRAN_ENABLED': 'unexpected'}):
             xdeploy_service.main()
@@ -44,12 +48,17 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_INTEL_ENABLED'], '1')
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_FLANG_ENABLED'], '1')
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_LFORTRAN_ENABLED'], '1')
+        self.assertEqual(json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_VERSIONS']),
+                         {name: name + ' version 1' for name in ('gfortran', 'ifx', 'flang', 'lfortran')})
+        self.assertEqual(json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_STANDARDS']),
+                         {name: {'2008': ['verified-flag']} for name in ('gfortran', 'ifx', 'flang', 'lfortran')})
 
     def test_intel_failure_keeps_gnu_available(self):
         gnu, intel, flang, _, deploy = self.deploy(intel_error=RuntimeError('Intel installation failed'))
         gnu.publish.assert_called_once_with('gnu-image')
         intel.publish.assert_not_called()
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_INTEL_ENABLED'], '0')
+        self.assertNotIn('ifx', json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_VERSIONS']))
         flang.publish.assert_called_once_with('flang-image')
         self.assertEqual(deploy.call_args.kwargs['env']['P2F_FLANG_ENABLED'], '1')
 
@@ -95,3 +104,33 @@ class DeploymentTests(unittest.TestCase):
     def test_gnu_failure_does_not_deploy(self):
         with self.assertRaisesRegex(RuntimeError, 'GNU build failed'):
             self.deploy(gnu_error=RuntimeError('GNU build failed'))
+
+    def test_version_reader_uses_metadata_not_compiler_and_cleans_up(self):
+        sandbox = Mock(returncode=0)
+        sandbox.stdout.read.return_value = json.dumps({'version': '\nGNU Fortran (GCC) 15.2.0\nCopyright details\n',
+                                                       'standards': {'2008': ['-std=f2008']}})
+        with patch.object(xdeploy_service.modal.Sandbox, 'create', return_value=sandbox) as create, \
+                patch.object(xdeploy_service.modal.Image, 'from_name'):
+            self.assertEqual(xdeploy_service.read_image_metadata(Mock(), 'image', 'gfortran'),
+                             {'version': 'GNU Fortran (GCC) 15.2.0', 'standards': {'2008': ['-std=f2008']}})
+        self.assertIn('manifest.json', create.call_args.args[2])
+        self.assertNotIn('--version', create.call_args.args[2])
+        sandbox.terminate.assert_called_once()
+
+    def test_version_reader_failure_still_cleans_up(self):
+        sandbox = Mock(returncode=1)
+        with patch.object(xdeploy_service.modal.Sandbox, 'create', return_value=sandbox), \
+                patch.object(xdeploy_service.modal.Image, 'from_name'):
+            with self.assertRaisesRegex(RuntimeError, 'metadata reader failed'):
+                xdeploy_service.read_image_metadata(Mock(), 'image', 'gfortran')
+        sandbox.terminate.assert_called_once()
+
+    def test_missing_versions_do_not_disable_compilers_or_preserve_stale_metadata(self):
+        with patch.dict(os.environ, {'P2F_COMPILER_VERSIONS': '{"gfortran":"old"}'}):
+            _, _, _, _, deploy = self.deploy(version_error=RuntimeError('metadata unavailable'))
+        env = deploy.call_args.kwargs['env']
+        self.assertEqual(json.loads(env['P2F_COMPILER_VERSIONS']), {})
+        self.assertEqual(json.loads(env['P2F_COMPILER_STANDARDS']), {})
+        self.assertEqual(env['P2F_INTEL_ENABLED'], '1')
+        self.assertEqual(env['P2F_FLANG_ENABLED'], '1')
+        self.assertEqual(env['P2F_LFORTRAN_ENABLED'], '1')

@@ -486,6 +486,16 @@ This is a UI-only update: push this repository for the Pages workflow to
 publish it. It uses the existing edit-mode API; no service redeployment is
 needed if that API is already deployed. Check with node tests/fortran_only.mjs.
 
+Compiler versions
+-----------------
+Compiler versions are exposed as compiler_versions in the session response and
+compiler_version in compilation/rerun results for clients such as fortran-playground.
+Hosted deployment reads the recorded helper-build banners once from each enabled
+compiler image and passes them to the API; sessions never launch a version probe.
+Local execution caches --version probes by trusted compiler command. An unavailable
+version does not disable a compiler. Redeploy with xdeploy_service.py to publish
+this metadata; existing clients may ignore the new fields.
+
 User-code compiler options on /run/
 ----------------------------------
 Choose Default, Debug, Optimized, or Strict when supported by the selected
@@ -494,8 +504,16 @@ only for compilers that offer them. The page shows the selected flags; build
 diagnostics show the actual command. Default preserves existing behavior.
 GNU Debug enables -fcheck=all and backtraces; Intel Debug enables -check all
 and traceback. Flang Debug enables -O0 -g only, not bounds-checking promises.
-Strict means GNU Fortran 2018 checking, Intel F2018 standards warnings, or
-Flang pedantic diagnostics, not identical behavior across compilers.
+Strict adds GNU pedantic/extra warnings, Intel extra warnings, or Flang pedantic
+diagnostics; it no longer supplies a standard year. Clients may select a separate
+standard (string year, or 'default') in compiler_options. Only years verified
+against that image are advertised and accepted. GNU uses -std=fYEAR (f95 for
+1995); Intel uses -stand f95/f03/f08/f18/f23 and reports conformance warnings.
+These checks do not promise complete implementation of the selected standard.
+Flang/LFortran standard flags are not offered yet. An older client without a
+standard control can continue using default/debug/optimized/strict presets.
+Standard flags are checked with cached helpers, recorded in their manifest and
+passed through deployment metadata; no per-session hosted probes are needed.
 LFortran currently offers Default and experimental --fast only.
 
 Options are validated against compiler_options.py on both local and hosted

@@ -138,6 +138,16 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/jobs', content='x' * (public.MAX_REQUEST + 1), headers={**self.headers, 'Content-Type': 'application/json'}).status_code, 413)
         self.assertFalse(self.runner.jobs)
 
+    def test_session_versions_are_cached_metadata_and_filter_unavailable_compilers(self):
+        self.service.compiler_versions = {'gfortran': 'GNU Fortran (GCC) 15.2.0', 'ifx': 'Intel test'}
+        for _ in range(2):
+            result = self.client.get('/api/session', headers=self.origin).json()
+            self.assertEqual(result['compiler_versions'], {'gfortran': 'GNU Fortran (GCC) 15.2.0'})
+        self.assertFalse(self.runner.jobs)
+        self.service.compiler_versions = {}
+        result = self.client.get('/api/session', headers=self.origin).json()
+        self.assertEqual(result['compiler_versions'], {'gfortran': None})
+
     def test_compiler_allowlist_and_unavailable_intel_do_not_start_jobs(self):
         self.assertEqual(self.client.get('/api/health').json()['compilers'], ['gfortran'])
         for choice in ('gcc', 'ifx -O3', 'flang -O3', 'lfortran --fast', 'gfortran; echo bad', ['ifx'], None):
@@ -177,6 +187,23 @@ class PublicTests(unittest.TestCase):
             'mode': 'compare', 'compiler_options': selection}, headers=self.headers)
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(self.runner.jobs['0']['payload']['compiler_options'], selection)
+
+    def test_standard_capabilities_are_verified_and_rejected_before_job_creation(self):
+        self.service.compiler_standards = {'gfortran': {'2008': ['-std=f2008'], '2023': ['forged-flag']}}
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
+        self.assertEqual(catalog['gfortran']['standards'], {'2008': ['-std=f2008']})
+        for standard in ('2018', '2023', '2008 -O3', 2008, [], None):
+            response = self.client.post('/api/jobs', json={'source': '', 'mode': 'fortran-compile',
+                'fortran_source': 'program main\nend program main\n',
+                'compiler_options': {'standard': standard}}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        self.assertFalse(self.runner.jobs)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        response = self.client.post('/api/jobs', json={'source': '', 'mode': 'fortran-compile',
+            'fortran_source': 'program main\nend program main\n',
+            'compiler_options': {'standard': '2008', 'preset': 'strict'}}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler_options']['standard'], '2008')
 
     def test_translation_settings_and_annotation_mode(self):
         self.assertTrue(self.client.get('/api/session', headers=self.origin).json()['source_tools'])

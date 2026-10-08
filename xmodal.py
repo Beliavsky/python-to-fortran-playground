@@ -121,7 +121,9 @@ api_image = (
     .env({'P2F_RUNTIME_IMAGE_NAME': RUNTIME_IMAGE_NAME,
           'P2F_INTEL_ENABLED': '1' if INTEL_ENABLED else '0',
           'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0',
-          'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0'})
+          'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0',
+          'P2F_COMPILER_VERSIONS': os.environ.get('P2F_COMPILER_VERSIONS', '{}'),
+          'P2F_COMPILER_STANDARDS': os.environ.get('P2F_COMPILER_STANDARDS', '{}')})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'compiler_options.py', '/root/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'translation_options.py', '/root/translation_options.py', copy=True)
@@ -201,6 +203,8 @@ def api():
     from xpublic_api import PublicService, create_api
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
     return create_api(PublicService(Store(), Sandboxes(), manifest['commit'], runtime_namespace=RUNTIME_IMAGE_NAME,
+                                   compiler_versions=json.loads(os.environ.get('P2F_COMPILER_VERSIONS', '{}')),
+                                   compiler_standards=json.loads(os.environ.get('P2F_COMPILER_STANDARDS', '{}')),
                                    compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
                                    + (('flang',) if FLANG_ENABLED else ())
                                    + (('lfortran',) if LFORTRAN_ENABLED else ())))

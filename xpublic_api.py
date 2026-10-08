@@ -34,11 +34,19 @@ COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran'}
 
 
 class PublicService:
-    def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',), runtime_namespace=None):
+    def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',), runtime_namespace=None,
+                 compiler_versions=None, compiler_standards=None):
         self.store, self.runner, self.commit, self.clock = store, runner, commit, clock
         self.lock = asyncio.Lock()
         self.compilers = tuple(compilers)
+        self.compiler_versions = dict(compiler_versions or {})
+        self.compiler_standards = dict(compiler_standards or {})
         self.runtime_namespace = runtime_namespace or commit
+
+    def compiler_catalog(self):
+        return {name: {**spec, 'standards': {year: flags for year, flags in spec['standards'].items()
+                    if self.compiler_standards.get(name, {}).get(year) == flags}}
+                for name, spec in OPTIONS.items()}
 
     async def board(self):
         board = await self.store.get('board', None)
@@ -79,7 +87,8 @@ class PublicService:
             board['sessions'][key] = {'expires': self.clock() + 3600, 'address': address_key}
             await self.store.put('board', board)
             return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
-                    'compilers': list(self.compilers), 'hosted': True, 'compiler_options': OPTIONS, 'source_tools': True,
+                    'compilers': list(self.compilers), 'hosted': True, 'compiler_options': self.compiler_catalog(), 'source_tools': True,
+                    'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
                     'features': {'compile_only': True, 'run_again': True, 'artifact_ttl': ARTIFACT_TTL}}
 
     async def retain(self, board, job, result):
@@ -147,6 +156,11 @@ class PublicService:
             if (payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
                     and payload.get('compiler', 'gfortran') not in self.compilers):
                 raise HTTPException(503, 'Selected compiler is unavailable. Choose GNU Fortran; no automatic fallback was used.')
+            try:
+                name = payload.get('compiler', 'gfortran')
+                user_flags(name, payload.get('compiler_options'), standards=self.compiler_catalog()[name]['standards'])
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from error
             if sum(job['state'] in {'running', 'starting'} for job in board['jobs'].values()) >= MAX_ACTIVE:
                 await self.store.put('board', board)
                 raise HTTPException(429, 'Two jobs are already running. Wait briefly and try again.')
