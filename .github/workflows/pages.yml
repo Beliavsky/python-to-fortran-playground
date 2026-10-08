@@ -34,6 +34,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_fortran_edit.py
       - run: python -m unittest discover -s tests -p test_compiler_options.py
       - run: python -m unittest discover -s tests -p test_source_tools.py
+      - run: python -m unittest discover -s tests -p test_formatting.py
       - run: python -m unittest discover -s tests -p test_examples.py
       - run: npm test
       - run: python -m unittest discover -s tests -p test_site_build.py

@@ -594,3 +594,9 @@ each compilation and rerun. Existing Python playground operations are unchanged.
 Redeploy with .venv-execution\Scripts\python.exe xdeploy_service.py before using
 the new buttons. Session features advertise support; old services leave the new
 frontend buttons disabled. No hosted deployment is performed by local tests.
+Fortran formatting: the Fortran-only frontend can submit explicit format jobs
+using fprettify==0.3.7 in the isolated GNU runtime image. These jobs do not invoke
+a compiler or execute source; they use fixed three-space indentation with no
+case changes, ignore formatting-option annotations, and share the usual job
+limits. For local formatting, install: python -m pip install fprettify==0.3.7.
+Redeploy with xdeploy_service.py to enable this feature on the hosted frontend.

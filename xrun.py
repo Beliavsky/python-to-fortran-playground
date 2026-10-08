@@ -5,6 +5,7 @@ import codeop
 from dataclasses import dataclass, field
 from functools import lru_cache
 import hashlib
+import importlib.util
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -28,7 +29,7 @@ MAX_SOURCE = 100_000
 MAX_OUTPUT = 200_000
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 COMPILE_MODES = {'fortran', 'both', 'compare'} | EDIT_MODES
-MODES = {"translate", "annotate", "python", "fortran", "both", "compare"} | EDIT_MODES
+MODES = {"translate", "annotate", "format", "python", "fortran", "both", "compare"} | EDIT_MODES
 MAX_EXECUTABLE = 4 * 1024 * 1024
 # Apply to helper compilation as well as generated source via upstream --compiler.
 DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
@@ -272,6 +273,22 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
+    if mode == 'format':
+        if (automatic or not isinstance(source, str) or not source.strip()
+                or len(source.encode('utf-8')) > MAX_SOURCE):
+            return {**result, 'error': 'Enter up to 100 KB of Fortran to format explicitly.'}
+        with tempfile.TemporaryDirectory(prefix='p2f_format_') as directory:
+            job = Path(directory)
+            (job / 'input.f90').write_text(source.replace('\r\n', '\n').replace('\r', '\n'), encoding='utf-8')
+            stage = run_command([sys.executable, str(ROOT / 'xformat_fortran.py')],
+                                job, cancel, min(timeout, 15))
+        result['formatting'] = stage
+        if stage['ok'] and not stage['stderr'].strip() and stage['stdout'].strip() and len(stage['stdout'].encode('utf-8')) <= MAX_SOURCE:
+            result.update(ok=True, formatted_source=stage['stdout'].replace('\r\n', '\n').replace('\r', '\n'))
+        else:
+            result['error'] = stage['stderr'] or 'Formatting failed or exceeded the output limit; source was not changed.'
+        result['seconds'] = time.perf_counter() - started
+        return result
     command_text = compiler_command(compiler_name, compiler)
     if mode in COMPILE_MODES or mode == 'fortran-run':
         result['compiler_version'] = compiler_version(runtime, compiler_name, command_text)
@@ -462,7 +479,7 @@ class Handler(SimpleHTTPRequestHandler):
                              "compilers": compilers, 'compiler_options': compiler_catalog(self.server.runtime, compilers, self.server.compiler),
                              'compiler_versions': {name: compiler_version(self.server.runtime, name,
                                  compiler_command(name, self.server.compiler)) for name in compilers},
-                             'source_tools': True})
+                             'source_tools': True, 'features': {'format': importlib.util.find_spec('fprettify') is not None}})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
                 return
@@ -503,6 +520,7 @@ class Handler(SimpleHTTPRequestHandler):
             if (not isinstance(mode, str) or mode not in MODES
                     or not valid_source or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
+                    or (mode == 'format' and payload.get('automatic', False))
                     or not isinstance(choice, str) or choice not in COMPILERS
                     or not isinstance(payload.get("automatic", False), bool)):
                 self.reply(400, {"error": "Enter valid source (up to 100 KB per language) and a valid operation."})

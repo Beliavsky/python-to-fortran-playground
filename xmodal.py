@@ -21,7 +21,7 @@ def runtime_image_name():
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
     for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py',
-                     'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
+                     'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
                      'xverify_flang.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
@@ -40,8 +40,9 @@ LFORTRAN_ENABLED = os.environ.get('P2F_LFORTRAN_ENABLED') == '1'
 job_image = (
     modal.Image.debian_slim(python_version='3.12')
     .apt_install('gfortran')
-    .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3')
+    .pip_install('numpy==2.2.6', 'scipy==1.15.3', 'pandas==2.2.3', 'fprettify==0.3.7')
     .add_local_file(ROOT / 'xrun.py', '/opt/p2f/xrun.py', copy=True)
+    .add_local_file(ROOT / 'xformat_fortran.py', '/opt/p2f/xformat_fortran.py', copy=True)
     .add_local_file(ROOT / 'compiler_options.py', '/opt/p2f/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'translation_options.py', '/opt/p2f/translation_options.py', copy=True)
     .add_local_file(ROOT / 'site/translation_settings.py', '/opt/p2f/site/translation_settings.py', copy=True)

@@ -29,7 +29,7 @@ MAX_DAILY = 100
 MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
-MODES = {'translate', 'annotate', 'python', 'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
+MODES = {'translate', 'annotate', 'format', 'python', 'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
 COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran'}
 
 
@@ -89,7 +89,7 @@ class PublicService:
             return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
                     'compilers': list(self.compilers), 'hosted': True, 'compiler_options': self.compiler_catalog(), 'source_tools': True,
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
-                    'features': {'compile_only': True, 'run_again': True, 'artifact_ttl': ARTIFACT_TTL}}
+                    'features': {'compile_only': True, 'run_again': True, 'format': True, 'artifact_ttl': ARTIFACT_TTL}}
 
     async def retain(self, board, job, result):
         blob = result.pop('_artifact', None)  # Never return executable bytes to browsers.
@@ -266,6 +266,7 @@ def create_api(service):
                     or (mode in EDIT_MODES and (not isinstance(ft_source, str) or not ft_source.strip()
                         or len(ft_source.encode()) > MAX_SOURCE or payload.get('automatic', False)))
                     or not isinstance(payload.get('automatic', False), bool)
+                    or (mode == 'format' and payload.get('automatic', False))
                     or not isinstance(payload.get('retain_executable', False), bool)
                     or (payload.get('retain_executable', False) and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode == 'fortran-run' and (payload.get('automatic', False)
