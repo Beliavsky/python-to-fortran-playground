@@ -44,7 +44,7 @@ def precompile(runtime, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('compiler', choices=('gfortran', 'ifx', 'flang', 'lfortran'))
+    parser.add_argument('compiler', choices=('gfortran', 'gfortran17', 'ifx', 'flang', 'lfortran'))
     parser.add_argument('--runtime', type=Path, default=Path('/opt/p2f/runtime'))
     parser.add_argument('--verify-only', action='store_true', help='Verify cached helpers without recompiling them')
     options = parser.parse_args()

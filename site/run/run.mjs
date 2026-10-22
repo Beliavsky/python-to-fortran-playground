@@ -160,6 +160,7 @@ async function connect() {
     sourceToolsAvailable = session.source_tools === true;
     optionCatalog = session.compiler_options || {};
     const compilers = session.compilers || ['gfortran'];
+    get('compiler-gnu17').disabled = !compilers.includes('gfortran17');
     get('compiler-intel').disabled = !compilers.includes('ifx');
     get('compiler-intel').textContent = compilers.includes('ifx') ? 'Intel Fortran (experimental)' : 'Intel Fortran (unavailable)';
     get('compiler-flang').disabled = !compilers.includes('flang');

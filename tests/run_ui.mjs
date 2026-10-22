@@ -41,6 +41,7 @@ assert.equal(get('compiler').value, 'gfortran');
 assert.equal(get('compiler-intel').disabled, true);
 assert.equal(get('compiler-flang').disabled, true);
 assert.equal(get('compiler-lfortran').disabled, true);
+assert.equal(get('compiler-gnu17').disabled, true);
 
 const result = { ok: true, mode: 'compare', seconds: 1.2, fortran: 'program input\nend program input\n', matches: true,
   build: { seconds: 0.8, stdout: 'Build: PASS', stderr: '' },
@@ -219,4 +220,14 @@ assert.match(get('python').value, /np.linalg.lstsq/);
 assert.equal(get('fortran').value, exampleOutput);
 assert.equal(get('live').checked, false);
 assert.equal(jobNumber, beforeExampleJobs);
+compilers = ['gfortran', 'gfortran17'];
+optionCatalog.gfortran17 = optionCatalog.gfortran;
+submissionStatus = 202;
+await get('connect').onclick();
+assert.equal(get('compiler-gnu17').disabled, false);
+get('compiler').value = 'gfortran17'; get('compiler').onchange();
+get('live').checked = false;
+state = {state: 'done', result};
+await get('run-fortran').onclick();
+assert.equal(created.compiler, 'gfortran17');
 console.log('Execution UI and confirmed example loading without job submission passed');

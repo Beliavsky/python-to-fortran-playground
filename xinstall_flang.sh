@@ -10,8 +10,9 @@ if [[ "$VERSION_CODENAME" != bookworm ]]; then
 fi
 curl --fail --show-error --silent --location https://apt.llvm.org/llvm-snapshot.gpg.key \
   | gpg --dearmor -o /usr/share/keyrings/p2f-llvm.gpg
-printf '%s\n' 'deb [signed-by=/usr/share/keyrings/p2f-llvm.gpg] https://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-21 main' > /etc/apt/sources.list.d/p2f-llvm.list
+printf '%s\n' 'deb [signed-by=/usr/share/keyrings/p2f-llvm.gpg] https://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-23 main' > /etc/apt/sources.list.d/p2f-llvm.list
 apt-get -o Acquire::https::CaInfo="$CURL_CA_BUNDLE" update
 apt-get -o Acquire::https::CaInfo="$CURL_CA_BUNDLE" install -y --no-install-recommends \
-  'flang-21=1:21.1.8~++20251221032947+2078da43e25a-1~exp1~20251221153113.67'
-flang-21 --version
+  'flang-23=1:23.1.5~++20261020014245+93acfd24c599-1~exp1~20261020134308.90' \
+  'clang-23=1:23.1.5~++20261020014245+93acfd24c599-1~exp1~20261020134308.90'
+flang-23 --version | grep -F '23.1.5'

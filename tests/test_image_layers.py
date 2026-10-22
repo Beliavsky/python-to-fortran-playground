@@ -36,6 +36,7 @@ def definitions(changed=None):
         App=lambda name: SimpleNamespace(function=decorator),
         Dict=SimpleNamespace(from_name=lambda *args, **kwargs: None),
         Image=SimpleNamespace(debian_slim=lambda **kwargs: Image((('debian', (), kwargs),)),
+                              from_registry=lambda *args, **kwargs: Image((('registry', args, kwargs),)),
                               micromamba=lambda **kwargs: Image((('conda', (), kwargs),))),
         is_local=lambda: True, concurrent=decorator, asgi_app=decorator)
     with patch.dict(sys.modules, {'modal': fake}), patch.object(Path, 'read_bytes', read):
@@ -43,6 +44,37 @@ def definitions(changed=None):
 
 
 class LayerTests(unittest.TestCase):
+    def test_caffeine_is_cached_per_compiler_after_helper_builds(self):
+        original, changed = definitions(), definitions('xinstall_caffeine.py')
+        for name in ('flang_job_image', 'lfortran_job_image'):
+            first, second = original[name].events, changed[name].events
+            boundary = next(i for i, event in enumerate(first)
+                            if event[0] == 'run_commands' and 'xbuild_helpers.py' in str(event[1]))
+            self.assertEqual(first[:boundary + 1], second[:boundary + 1])
+            self.assertNotEqual(first, second)
+            self.assertIn('cmake==4.1.3', str(first))
+            self.assertIn('xinstall_caffeine.py --compiler', str(first))
+        for name in ('job_image', 'intel_job_image', 'ofort_job_image'):
+            self.assertEqual(original[name].events, changed[name].events)
+            self.assertNotIn('xinstall_caffeine.py', str(original[name].events))
+        self.assertIn('flang-23', str(original['flang_job_image'].events))
+    def test_gnu_images_are_pinned_and_routed_independently(self):
+        images = definitions()
+        stable = str(images['gnu_toolchain_image'].events)
+        self.assertIn('gcc:16.2.0-trixie@sha256:', stable)
+        self.assertIn('-dumpfullversion', stable)
+        self.assertIn('16.2.0', stable)
+        snapshot = str(images['gnu17_job_image'].events)
+        self.assertIn('xinstall_gnu17.sh', snapshot)
+        self.assertIn('xbuild_helpers.py gfortran17', snapshot)
+        self.assertIn('p2f-gfortran17 -ffree-line-length-none', snapshot)
+        self.assertIn('xverify_gnu.py --compiler gfortran17', snapshot)
+        for name in ('intel_installed_image', 'flang_installed_image'):
+            self.assertNotIn('gcc:16.2', str(images[name].events))
+        for mode in ('fortran-edit', 'fortran-compile', 'fortran-run'):
+            self.assertEqual(images['job_image_name']({'mode': mode, 'compiler': 'gfortran17'}), images['GNU17_IMAGE_NAME'])
+        self.assertEqual(images['job_image_name']({'mode': 'check', 'compiler': 'gfortran17'}), images['TOOLS_IMAGE_NAME'])
+
     def test_ofort_has_no_compiled_helper_dependency(self):
         images = definitions()
         events = str(images['ofort_job_image'].events)

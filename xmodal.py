@@ -23,7 +23,7 @@ def runtime_image_name():
     for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py',
                      'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xbuild_helpers.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
-                     'xverify_flang.py', 'xinstall_ofort.sh', 'xverify_ofort.py', 'upstream.json',
+                     'xverify_flang.py', 'xinstall_ofort.sh', 'xverify_ofort.py', 'xinstall_gnu17.sh', 'xverify_gnu.py', 'xverify_coarrays.py', 'xinstall_caffeine.py', 'upstream.json',
                      'site/vendor/manifest.json', 'site/vendor/upstream.zip'):
         digest.update((ROOT / filename).read_bytes())
     return 'p2f-runtime-' + digest.hexdigest()[:20]
@@ -39,17 +39,25 @@ LFORTRAN_ENABLED = os.environ.get('P2F_LFORTRAN_ENABLED') == '1'
 OFORT_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-ofort'
 OFORT_ENABLED = os.environ.get('P2F_OFORT_ENABLED') == '1'
 TOOLS_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-tools'
+GNU17_IMAGE_NAME = RUNTIME_IMAGE_NAME + '-gnu17'
+GNU17_ENABLED = os.environ.get('P2F_GNU17_ENABLED') == '1'
 
 # Nothing from the application, formatter, linter, or upstream bundle belongs
 # ahead of a compiler installation. Modal can reuse these stable parent layers.
 gnu_toolchain_image = (
-    modal.Image.debian_slim(python_version='3.12')
-    .apt_install('gfortran')
+    modal.Image.from_registry('gcc:16.2.0-trixie@sha256:43978d7710a803d1c3d32f4117c1528ec7285a4ce2c0a51e982ec1a6e3d87d95', add_python='3.12')
+    .run_commands('test "$(gfortran -dumpfullversion)" = 16.2.0')
 )
+# Preserve the existing support toolchain for Intel and LLVM images.
+support_toolchain_image = modal.Image.debian_slim(python_version='3.12').apt_install('gfortran')
+gnu17_installed_image = (gnu_toolchain_image
+    .apt_install('curl', 'ca-certificates', 'build-essential', 'libgmp-dev', 'libmpfr-dev', 'libmpc-dev', 'libisl-dev', 'flex', 'bison', 'texinfo', 'xz-utils')
+    .add_local_file(ROOT / 'xinstall_gnu17.sh', '/opt/p2f/xinstall_gnu17.sh', copy=True)
+    .run_commands('bash /opt/p2f/xinstall_gnu17.sh'))
 
 # Separate optional image: GNU jobs do not pull Intel's toolchain.
 intel_installed_image = (
-    gnu_toolchain_image
+    support_toolchain_image
     .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
     .pip_install('certifi==2026.2.25')
     .add_local_file(ROOT / 'xinstall_intel.sh', '/opt/p2f/xinstall_intel.sh', copy=True)
@@ -58,7 +66,7 @@ intel_installed_image = (
 
 # Independent optional image; no Intel installation or cross-compiler modules.
 flang_installed_image = (
-    gnu_toolchain_image
+    support_toolchain_image
     .apt_install('curl', 'gnupg', 'build-essential', 'ca-certificates')
     .pip_install('certifi==2026.2.25')
     .add_local_file(ROOT / 'xinstall_flang.sh', '/opt/p2f/xinstall_flang.sh', copy=True)
@@ -85,7 +93,7 @@ def application_image(base, source_tools=False):
     image = base
     for filename in ('xrun.py', 'compiler_options.py', 'translation_options.py',
                      'site/translation_settings.py', 'site/annotations.py', 'xcompile_fortran.py',
-                     'xprecompile.py', 'xsandbox_worker.py', 'xverify_intel.py', 'xverify_flang.py'):
+                     'xprecompile.py', 'xsandbox_worker.py', 'xverify_intel.py', 'xverify_flang.py', 'xverify_gnu.py', 'xverify_coarrays.py'):
         image = image.add_local_file(ROOT / filename, '/opt/p2f/' + filename, copy=True)
     if source_tools:
         image = image.add_local_file(ROOT / 'xformat_fortran.py', '/opt/p2f/xformat_fortran.py', copy=True)
@@ -93,18 +101,34 @@ def application_image(base, source_tools=False):
         {'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'})
 
 
+def caffeine_image(base, compiler):
+    # Build separately from helper modules and application code. Failure of this
+    # optional runtime leaves the compiler usable; deployment still probes it.
+    packages = ['git', 'curl', 'make', 'pkg-config', 'perl', 'build-essential', 'ca-certificates']
+    if compiler == 'lfortran':
+        packages.append('clang')
+    return (base.apt_install(*packages).pip_install('cmake==4.1.3')
+        .add_local_file(ROOT / 'xinstall_caffeine.py', '/opt/p2f/xinstall_caffeine.py', copy=True)
+        .run_commands(f'python /opt/p2f/xinstall_caffeine.py --compiler {compiler}'))
+
+
 # Reverify application changes against cached helpers; do not rebuild artifacts.
 job_image = application_image(helper_image(gnu_toolchain_image, 'gfortran',
     'gfortran -ffree-line-length-none')).run_commands(
-    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran --verify-only')
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran --verify-only',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_gnu.py --compiler gfortran')
+gnu17_job_image = application_image(helper_image(gnu17_installed_image, 'gfortran17',
+    'p2f-gfortran17 -ffree-line-length-none')).run_commands(
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py gfortran17 --verify-only',
+    'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_gnu.py --compiler gfortran17')
 intel_job_image = application_image(helper_image(intel_installed_image, 'ifx', 'p2f-ifx')).run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py ifx --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_intel.py')
-flang_job_image = application_image(helper_image(flang_installed_image, 'flang', 'flang-21')).run_commands(
+flang_job_image = application_image(caffeine_image(helper_image(flang_installed_image, 'flang', 'flang-23'), 'flang')).run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py flang --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py')
-lfortran_job_image = application_image(helper_image(lfortran_installed_image, 'lfortran',
-    'lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections --realloc-lhs-arrays')).run_commands(
+lfortran_job_image = application_image(caffeine_image(helper_image(lfortran_installed_image, 'lfortran',
+    'lfortran --no-style-suggestions --no-color --implicit-interface --separate-compilation --legacy-array-sections --realloc-lhs-arrays'), 'lfortran')).run_commands(
     'PYTHONPATH=/opt/p2f python /opt/p2f/xprecompile.py lfortran --verify-only',
     'PYTHONPATH=/opt/p2f python /opt/p2f/xverify_flang.py --compiler lfortran')
 
@@ -129,8 +153,11 @@ api_image = (
           'P2F_FLANG_ENABLED': '1' if FLANG_ENABLED else '0',
           'P2F_LFORTRAN_ENABLED': '1' if LFORTRAN_ENABLED else '0',
           'P2F_OFORT_ENABLED': '1' if OFORT_ENABLED else '0',
+          'P2F_GNU17_ENABLED': '1' if GNU17_ENABLED else '0',
+          'P2F_OWNER_SECRET_NAME': os.environ.get('P2F_OWNER_SECRET_NAME', ''),
           'P2F_COMPILER_VERSIONS': os.environ.get('P2F_COMPILER_VERSIONS', '{}'),
-          'P2F_COMPILER_STANDARDS': os.environ.get('P2F_COMPILER_STANDARDS', '{}')})
+          'P2F_COMPILER_STANDARDS': os.environ.get('P2F_COMPILER_STANDARDS', '{}'),
+          'P2F_COMPILER_COARRAYS': os.environ.get('P2F_COMPILER_COARRAYS', '{}')})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
     .add_local_file(ROOT / 'compiler_options.py', '/root/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'translation_options.py', '/root/translation_options.py', copy=True)
@@ -154,7 +181,7 @@ def job_image_name(payload):
     if payload.get('mode') in {'format', 'check'}:
         return TOOLS_IMAGE_NAME
     if payload.get('mode') in {'fortran', 'both', 'compare', 'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile', 'fortran-run'}:
-        return {'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
+        return {'gfortran17': GNU17_IMAGE_NAME, 'ifx': INTEL_IMAGE_NAME, 'flang': FLANG_IMAGE_NAME,
                 'lfortran': LFORTRAN_IMAGE_NAME, 'ofort': OFORT_IMAGE_NAME}.get(payload.get('compiler'), RUNTIME_IMAGE_NAME)
     return RUNTIME_IMAGE_NAME
 
@@ -208,16 +235,21 @@ class Sandboxes:
 
 
 # One API container serializes durable limits; jobs are separate sandboxes.
-@app.function(image=api_image, cpu=(0.125, 0.5), memory=(256, 512), max_containers=1, timeout=150)
+@app.function(image=api_image, cpu=(0.125, 0.5), memory=(256, 512), max_containers=1, timeout=150,
+              secrets=[modal.Secret.from_name(os.environ['P2F_OWNER_SECRET_NAME'], required_keys=['P2F_OWNER_KEY'])]
+              if os.environ.get('P2F_OWNER_SECRET_NAME') else [])
 @modal.concurrent(max_inputs=16)
 @modal.asgi_app()
 def api():
     from xpublic_api import PublicService, create_api
     manifest = json.loads(Path('/opt/p2f/manifest.json').read_text())
     return create_api(PublicService(Store(), Sandboxes(), manifest['commit'], runtime_namespace=RUNTIME_IMAGE_NAME,
+                                   owner_key=os.environ.get('P2F_OWNER_KEY', ''),
                                    compiler_versions=json.loads(os.environ.get('P2F_COMPILER_VERSIONS', '{}')),
                                    compiler_standards=json.loads(os.environ.get('P2F_COMPILER_STANDARDS', '{}')),
+                                   compiler_coarrays=json.loads(os.environ.get('P2F_COMPILER_COARRAYS', '{}')),
                                    compilers=('gfortran',) + (('ifx',) if INTEL_ENABLED else ())
+                                   + (('gfortran17',) if GNU17_ENABLED else ())
                                    + (('flang',) if FLANG_ENABLED else ())
                                    + (('lfortran',) if LFORTRAN_ENABLED else ())
                                    + (('ofort',) if OFORT_ENABLED else ())))

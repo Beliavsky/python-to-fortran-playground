@@ -21,6 +21,14 @@ exec ifx "$@"
 WRAPPER
 chmod 755 /usr/local/bin/p2f-ifx
 /usr/local/bin/p2f-ifx --version
+# The compiler package depends on intel-oneapi-mpi-2021.17. Executables need
+# its launcher environment too; the compiler wrapper's exports do not persist.
+cat > /usr/local/bin/p2f-ifx-run <<'WRAPPER'
+#!/bin/bash
+source /opt/intel/oneapi/setvars.sh > /dev/null 2>&1
+exec "$@"
+WRAPPER
+chmod 755 /usr/local/bin/p2f-ifx-run
 # setvars runs in the compiler subprocess, not the subsequent executable.
 # Register Intel's redistributable libraries for standalone program execution.
 find /opt/intel/oneapi/compiler \( -name 'libimf.so*' -o -name 'libsvml.so*' \

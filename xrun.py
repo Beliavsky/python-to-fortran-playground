@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from compiler_options import OPTIONS, user_flags
+from compiler_options import OPTIONS, user_flags, coarray_environment, coarray_command
 from translation_options import validate_options, cli_options, strip_fortran_comments
 
 ROOT = Path(__file__).resolve().parent
@@ -36,7 +36,7 @@ DEFAULT_COMPILER = "gfortran -ffree-line-length-none"
 DEFAULT_OFORT = 'ofort --fast'
 DEFAULT_LFORTRAN = ('lfortran --no-style-suggestions --no-color --implicit-interface '
                     '--separate-compilation --legacy-array-sections --realloc-lhs-arrays')
-COMPILERS = {"gfortran", "ifx", "flang", "lfortran", "ofort"}
+COMPILERS = {"gfortran", "gfortran17", "ifx", "flang", "lfortran", "ofort"}
 
 
 def helper_identity(runtime, command):
@@ -79,12 +79,14 @@ def compiler_command(name, default=DEFAULT_COMPILER):
     """Map a browser choice to a trusted command, never accept browser flags."""
     if name == "gfortran":
         return default
+    if name == 'gfortran17':
+        return 'p2f-gfortran17 -ffree-line-length-none'
     if name == "ifx":
         # Hosted wrapper initializes Intel's library/tool environment.
         return "p2f-ifx" if shutil.which("p2f-ifx") else "ifx"
     if name == "flang":
-        # Hosted image pins LLVM 21; allow normal local LLVM installations too.
-        return next((exe for exe in ('flang-21', 'flang', 'flang-new') if shutil.which(exe)), 'flang-21')
+        # Hosted image pins LLVM 23; allow normal local LLVM installations too.
+        return next((exe for exe in ('flang-23', 'flang-21', 'flang', 'flang-new') if shutil.which(exe)), 'flang-23')
     if name == "lfortran":
         return DEFAULT_LFORTRAN
     if name == 'ofort':
@@ -94,7 +96,7 @@ def compiler_command(name, default=DEFAULT_COMPILER):
 
 def available_compilers(default=DEFAULT_COMPILER):
     available = []
-    for name in ("gfortran", "ifx", "flang", "lfortran", "ofort"):
+    for name in ("gfortran", "gfortran17", "ifx", "flang", "lfortran", "ofort"):
         if shutil.which(shlex.split(compiler_command(name, default))[0]):
             available.append(name)
     return available
@@ -167,7 +169,10 @@ def runtime_standards(runtime, name, command):
 
 
 def compiler_catalog(runtime, names, default=DEFAULT_COMPILER):
-    return {name: {**OPTIONS[name], 'standards': runtime_standards(runtime, name, compiler_command(name, default))}
+    # Hosted capabilities are supplied by the deployment's isolated-sandbox probe.
+    # Merely finding a local compiler does not establish coarray runtime support.
+    return {name: {**OPTIONS[name], 'coarray_images': {},
+                   'standards': runtime_standards(runtime, name, compiler_command(name, default))}
             for name in names}
 
 
@@ -202,7 +207,7 @@ def stop_process(process):
             pass
 
 
-def run_command(command, cwd, cancel, timeout):
+def run_command(command, cwd, cancel, timeout, *, env=None):
     """Bound captured output while draining both pipes; stop the entire process tree."""
     started = time.perf_counter()
     options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
@@ -212,7 +217,7 @@ def run_command(command, cwd, cancel, timeout):
     try:
         process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}, **options)
+                                   env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", **(env or {})}, **options)
     except OSError as error:
         return {**result, "stderr": str(error), "seconds": time.perf_counter() - started}
     buffers = [bytearray(), bytearray()]
@@ -338,6 +343,12 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
     flags = user_flags(compiler_name, compiler_options, standards=runtime_standards(runtime, compiler_name, command_text)
                        if selected_standard != 'default' else None)
     settings = validate_options(translation_options)
+    images = (compiler_options or {}).get('images')
+    execution_env = coarray_environment(compiler_name, images)
+    coarray_arguments = []
+    if images is not None and (compiler_name in ('flang', 'lfortran') or
+                              compiler_name in ('gfortran', 'gfortran17') and images > 1):
+        coarray_arguments = ['--coarray-runtime', compiler_name, '--coarray-images', str(images)]
     result['compiler_options'] = compiler_options or {'preset': 'default'}
     result['translation_options'] = settings if mode not in EDIT_MODES else None
     if mode == 'fortran-run':
@@ -355,7 +366,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             exe = Path(directory) / 'input_p.exe'
             exe.write_bytes(binary)
             exe.chmod(0o700)
-            result['execution'] = run_command([str(exe)], Path(directory), cancel, timeout)
+            result['execution'] = run_command(coarray_command(compiler_name, exe, images), Path(directory), cancel, timeout, env=execution_env)
         result.update(ok=result['execution']['ok'], reused_executable=True,
                       translation_options=None, seconds=time.perf_counter() - started)
         return result
@@ -391,7 +402,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             result['fortran'] = fortran_source
             result['precompiled_helpers'] = seed_helper_cache(runtime, ft, compiler_name, command_text)
             command = [sys.executable, str(ROOT / 'xcompile_fortran.py'), '--runtime', str(runtime),
-                       '--compiler', command_text, '--user-flags', json.dumps(flags)]
+                       '--compiler', command_text, '--user-flags', json.dumps(flags)] + coarray_arguments
             result['build'] = run_command(command, ft, cancel, 180)
         elif mode != "python":
             command = [sys.executable, str(runtime / "xp2f.py"), "input.py", "--flat", "--out", "input_p.f90"] + cli_options(settings)
@@ -410,7 +421,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
                 translated = result['build']
                 result['build'] = run_command([sys.executable, str(ROOT / 'xcompile_fortran.py'),
                     '--runtime', str(runtime), '--compiler', command_text,
-                    '--user-flags', json.dumps(flags)], ft, cancel, 180)
+                    '--user-flags', json.dumps(flags)] + coarray_arguments, ft, cancel, 180)
                 result['build']['stdout'] = translated['stdout'] + result['build']['stdout']
                 result['build']['stderr'] = translated['stderr'] + result['build']['stderr']
                 result['build']['seconds'] += translated['seconds']
@@ -433,7 +444,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         if mode in COMPILE_MODES and mode != 'fortran-compile' and result["build"]["ok"]:
             # The pinned upstream CLI uses .exe on every platform.
             exe = ft / "input_p.exe"
-            result["execution"] = run_command([str(exe)], ft, cancel, timeout)
+            result["execution"] = run_command(coarray_command(compiler_name, exe, images), ft, cancel, timeout, env=execution_env)
         stages = [result[key]["ok"] for key in ("build", "python", "execution") if key in result]
         result["ok"] = bool(stages) and all(stages) and not cancel.is_set()
         if mode in {'compare', 'compare-edit'} and result["ok"]:

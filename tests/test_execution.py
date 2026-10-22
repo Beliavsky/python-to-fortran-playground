@@ -91,6 +91,8 @@ class ExecutionTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_flang_selection_and_unavailable_compiler(self):
+        with patch('xrun.shutil.which', side_effect=lambda name: name if name in ('flang-23', 'flang-21') else None):
+            self.assertEqual(xrun.compiler_command('flang'), 'flang-23')
         with patch('xrun.shutil.which', side_effect=lambda name: name if name == 'flang-21' else None):
             self.assertEqual(xrun.compiler_command('flang'), 'flang-21')
             self.assertEqual(xrun.available_compilers(), ['flang'])
@@ -123,7 +125,7 @@ class ExecutionTests(unittest.TestCase):
             precompile(runtime, 'lfortran')
             verify(runtime, 'lfortran')
 
-    @unittest.skipUnless(any(shutil.which(exe) for exe in ('flang-21', 'flang', 'flang-new')),
+    @unittest.skipUnless(any(shutil.which(exe) for exe in ('flang-23', 'flang-21', 'flang', 'flang-new')),
                          'LLVM Flang compiler required')
     def test_flang_precompiled_helpers_and_translations(self):
         from xverify_flang import verify

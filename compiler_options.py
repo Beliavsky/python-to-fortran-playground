@@ -1,4 +1,7 @@
 """Server-owned, ABI-compatible user-code options; reject unlisted arguments."""
+from copy import deepcopy
+import json
+from pathlib import Path
 OPTIONS = {
     'ofort': {
         'presets': {'default': []}, 'extras': {}, 'standards': {},
@@ -92,6 +95,59 @@ OPTIONS['ofort']['portable_option_notes'] = {'optimization': {
     str(level): f'optimization level {level} ignored; interpreter has no equivalent.'
     for level in range(4)}}
 
+# Same option vocabulary, but a distinct command, image, and helper cache.
+OPTIONS['gfortran17'] = deepcopy(OPTIONS['gfortran'])
+OPTIONS['gfortran17']['note'] += ' Experimental GNU 17 snapshot, pinned to 2026-10-18.'
+for name in ('gfortran', 'gfortran17'):
+    OPTIONS[name]['coarray_images'] = {'1': ['-fcoarray=single'],
+                                      '2': ['-fcoarray=lib'], '4': ['-fcoarray=lib']}
+OPTIONS['ifx']['coarray_images'] = {
+    str(count): ['-coarray=single'] if count == 1 else
+                ['-coarray=shared', f'-coarray-num-images={count}']
+    for count in (1, 2, 4)}
+for name, flag in [('flang', '-fcoarray'), ('lfortran', '--coarray=true')]:
+    OPTIONS[name]['coarray_images'] = {str(count): [flag] for count in (1, 2, 4)}
+    OPTIONS[name]['coarray_note'] = ('Experimental coarrays via Caffeine/GASNet shared memory. '
+        'Only sandbox-verified image counts are offered; some language features remain incomplete.')
+OPTIONS['lfortran']['coarray_note'] += ' LFortran may print STOP on normal termination.'
+
+
+COARRAY_RUNTIME_ROOT = Path('/opt/p2f/coarrays')
+
+
+def coarray_link_flags(compiler, images=None):
+    """Read image-owned build metadata; clients cannot provide paths or libraries."""
+    if compiler in ('gfortran', 'gfortran17'):
+        return ['-lcaf_shmem'] if images in (2, 4) else []
+    if compiler not in ('flang', 'lfortran'):
+        return []
+    try:
+        flags = json.loads((COARRAY_RUNTIME_ROOT / compiler / 'link-flags.json').read_text())['flags']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError(f'{compiler} Caffeine runtime is unavailable in this image') from error
+    if not isinstance(flags, list) or not flags or any(not isinstance(flag, str) or not flag for flag in flags):
+        raise RuntimeError('Invalid Caffeine build metadata')
+    return flags
+
+
+def coarray_environment(compiler, images):
+    """Trusted runtime settings shared by deployment probes and user execution."""
+    if images is None:
+        return None
+    if compiler == 'ifx':
+        return {'FOR_COARRAY_NUM_IMAGES': str(images), 'I_MPI_FABRICS': 'shm',
+                'I_MPI_PIN': '0', 'I_MPI_WAIT_MODE': '1'}
+    if compiler in ('flang', 'lfortran'):
+        return {'GASNET_PSHM_NODES': str(images), 'GASNET_MAX_SEGSIZE': '64M',
+                'GASNET_EXITTIMEOUT': '2', 'GASNET_BACKTRACE': '0'}
+    return {'GFORTRAN_NUM_IMAGES': str(images), 'GFORTRAN_SHARED_MEMORY_SIZE': '64M',
+            'GFORTRAN_IMAGE_RESTARTS_LIMIT': '8'}
+
+
+def coarray_command(compiler, executable, images):
+    # Initialize Intel's MPI environment for the executable, separately from ifx.
+    return (['p2f-ifx-run'] if compiler == 'ifx' and images is not None else []) + [str(executable)]
+
 
 def additional_flags(spec, flags, additional):
     """Validate bounded token lists against the same catalog advertised to clients."""
@@ -123,10 +179,10 @@ def additional_flags(spec, flags, additional):
     return flags + additional
 
 
-def user_flags(compiler, selection=None, *, standards=None):
+def user_flags(compiler, selection=None, *, standards=None, coarrays=None):
     if selection is None:
         selection = {}
-    if not isinstance(selection, dict) or set(selection) - {'preset', 'warnings', 'fast_math', 'standard', 'preprocess', 'additional'}:
+    if not isinstance(selection, dict) or set(selection) - {'preset', 'warnings', 'fast_math', 'standard', 'preprocess', 'additional', 'images'}:
         raise ValueError('Choose supported compiler options, not raw flags.')
     spec = OPTIONS[compiler]
     preset = selection.get('preset', 'default')
@@ -140,6 +196,12 @@ def user_flags(compiler, selection=None, *, standards=None):
         raise ValueError('This compiler does not support the selected standard.')
     if standard != 'default':
         flags.extend(spec['standards'][standard])
+    if 'images' in selection:
+        images = selection['images']
+        supported_images = spec.get('coarray_images', {}) if coarrays is None else coarrays
+        if type(images) is not int or str(images) not in supported_images or str(images) not in spec.get('coarray_images', {}):
+            raise ValueError('Choose a verified coarray image count (1, 2, or 4) for a supported compiler.')
+        flags.extend(spec['coarray_images'][str(images)])
     for key in ('warnings', 'fast_math', 'preprocess'):
         enabled = selection.get(key, False)
         if not isinstance(enabled, bool) or (enabled and key not in spec['extras']):

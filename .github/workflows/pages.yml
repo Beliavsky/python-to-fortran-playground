@@ -37,6 +37,10 @@ jobs:
       - run: python -m unittest discover -s tests -p test_formatting.py
       - run: python -m unittest discover -s tests -p test_checking.py
       - run: python -m unittest discover -s tests -p test_image_layers.py
+      - run: python -m unittest discover -s tests -p test_deploy_service.py
+      - run: python -m unittest discover -s tests -p test_gnu_toolchains.py
+      - run: python -m unittest discover -s tests -p test_coarrays.py
+      - run: python -m unittest discover -s tests -p test_caffeine.py
       - run: python -m unittest discover -s tests -p test_helper_build.py
       - run: python -m unittest discover -s tests -p test_examples.py
       - run: npm test

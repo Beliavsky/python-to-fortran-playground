@@ -52,7 +52,7 @@ def build(root, name, command):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('compiler', choices=('gfortran', 'ifx', 'flang', 'lfortran'))
+    parser.add_argument('compiler', choices=('gfortran', 'gfortran17', 'ifx', 'flang', 'lfortran'))
     parser.add_argument('--command', required=True)
     parser.add_argument('--root', type=Path, default=Path('/opt/p2f'))
     args = parser.parse_args()

@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+from compiler_options import coarray_link_flags
 
 
 def helper_modules(source):
@@ -26,6 +27,8 @@ def main():
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--compiler', required=True)
     parser.add_argument('--user-flags', default='[]')
+    parser.add_argument('--coarray-runtime', choices=('gfortran', 'gfortran17', 'flang', 'lfortran'))
+    parser.add_argument('--coarray-images', type=int, choices=(1, 2, 4))
     options = parser.parse_args()
     parts = shlex.split(options.compiler)
     helpers = []
@@ -60,6 +63,8 @@ def main():
             print(failure.stderr, end='', file=sys.stderr)
             return failure.returncode or 1
     command = parts + json.loads(options.user_flags) + helpers + ['input_p.f90', '-o', 'input_p.exe']
+    if options.coarray_runtime:
+        command += coarray_link_flags(options.coarray_runtime, options.coarray_images)
     print('Build:', ' '.join(command), flush=True)
     result = subprocess.run(command, check=False)
     print('Build: PASS' if result.returncode == 0 else 'Build: FAIL', flush=True)

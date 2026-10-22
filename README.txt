@@ -245,8 +245,9 @@ against the service's daily allowance. Local preview without an image cache
 continues to compile normally.
 
 LLVM Flang has its own optional image, independent of Intel. It uses the
-signed https://apt.llvm.org/bookworm/ LLVM 21 repository and pins flang-21 to
-1:21.1.8~++20251221032947+2078da43e25a-1~exp1~20251221153113.67 (LLVM 21.1.8).
+signed https://apt.llvm.org/bookworm/ LLVM 23 repository and pins flang-23 and
+clang-23 to 1:23.1.5~++20261020014245+93acfd24c599-1~exp1~20261020134308.90
+(LLVM 23.1.5), enabling experimental Caffeine coarray integration.
 Neither the upstream transpiler nor helper sources are modified. The image
 must compile both helpers and pass arithmetic, mean/std, LAPACK solve,
 formatting, and random-number execution checks using its own precompiled
@@ -254,7 +255,7 @@ objects/modules before Flang is advertised. A failed Flang image does not
 disable GNU or Intel. Use --without-flang to skip it; use both --without-intel
 and --without-flang and --without-lfortran for a GNU-only deployment. These optional images add
 build time and Modal usage. Visitors cannot supply arbitrary compiler flags.
-Local preview detects flang-21, flang, or flang-new on PATH (LLVM Flang only).
+Local preview detects flang-23, flang-21, flang, or flang-new on PATH (LLVM Flang only).
 To require Flang in hosted validation:
   .venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-flang
 Validation uses three GNU jobs plus three jobs for each advertised optional
@@ -694,3 +695,135 @@ validation rejects conflicts before provisioning or quota charging. Clients
 must reject unavailable mappings before submitting their first job. Redeploy
 with xdeploy_service.py to publish the new catalog; no extra sandbox work or
 API requests are needed to translate options.
+
+Private owner quota exemption
+-----------------------------
+Public jobs share MAX_DAILY and a per-address rate allowance. An optional
+private owner key bypasses only those two quotas. Owner jobs increment the
+separate owner_daily counter instead of consuming public allowance. Concurrency,
+source/options validation, session ownership, expiry, sandbox isolation, and
+execution limits remain in effect. Existing public sessions gain no privileges.
+
+Generate a random key locally (do not commit it):
+  python -c "import secrets; print(secrets.token_urlsafe(32))"
+Create a Modal dashboard secret named p2f-owner containing P2F_OWNER_KEY with
+that value (32-256 characters), then deploy:
+  .venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py --owner-secret p2f-owner
+Repeat --owner-secret on subsequent deployments, or set the nonsecret variable
+P2F_OWNER_SECRET_NAME=p2f-owner in the deployment environment. Without either
+setting, owner access is disabled and no Modal secret is required.
+
+The secret is attached only to the API function, never to images or sandboxes.
+Session metadata advertises owner_access without exposing a key. Job requests
+may send X-P2F-Owner-Key; the API compares it with the configured value on every
+submission. Invalid keys fail with HTTP 403 before provisioning or quota use.
+The header is never forwarded in worker JSON, saved to the durable board,
+returned in responses, or used as a replacement for normal session ownership.
+The frontend's Owner access password field holds it only for the current page;
+the Python runner's --owner reads P2F_OWNER_KEY or prompts without echoing.
+
+Update the Modal secret and redeploy to rotate the credential. Remove the
+owner-secret deployment configuration and redeploy to disable it. Public
+counters are preserved; owner access works when public allowance is exhausted.
+
+Pinned GNU compilers
+---------------------
+The default gfortran image uses official GCC 16.2.0 on Debian trixie, pinned by
+container digest in xmodal.py. GNU 17 is a separate optional compiler ID,
+gfortran17, built from snapshot 17-20261018 and verified against the pinned
+SHA-512 checksum in xinstall_gnu17.sh. Its trusted command is
+p2f-gfortran17 -ffree-line-length-none; there is no stable-compiler fallback.
+The GNU 17 wrapper, helper cache, image, standard probes, version metadata,
+and retained executables are separate from stable GNU. GNU 17 uses the same
+allowlisted compiler options and portable option mappings.
+
+GNU 16.2 image source:
+  https://github.com/docker-library/gcc/blob/master/16/Dockerfile
+GNU 17 snapshot and published checksums:
+  https://sourceware.org/pub/gcc/snapshots/17-20261018/
+
+Deployment builds/verifies stable GNU first. Stable failure prevents deploy;
+experimental failure marks only GNU 17 unavailable. --without-gnu17 skips it.
+The first build compiles the snapshot and refreshes GNU helpers. Later builds
+cache the compiler installation separately from application changes. Existing
+Intel and Flang support images remain based on their previous Debian packages;
+LFortran and ofort installations are unchanged.
+
+xverify_gnu.py gates both GNU images on exact compiler identity, standalone
+source, preprocessing, option handling, failure diagnostics, retained executable
+reuse, and translated-code/helper integration. Version/standard metadata are
+read from each image at deployment, never guessed by the browser or runner.
+
+Deploy with owner access preserved:
+  .venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py --owner-secret p2f-owner
+Then publish both frontends. Select GNU 17 explicitly in Advanced mode or run:
+  python xplayground_run.py example.f90 --compilers gfortran gfortran17 --O 3
+
+Bounded coarray execution
+-------------------------
+compiler_options.images accepts integer 1, 2, or 4 for sandbox-verified compiler images.
+For GNU, one image adds -fcoarray=single; multiple images add -fcoarray=lib
+and link the native shared-memory library with -lcaf_shmem after user objects. The
+standalone frontend exposes an Advanced selector, and xplayground_run.py
+accepts --images or common.images in its JSON configuration. Raw coarray flags
+remain outside the additional-argument allowlist. ofort rejects images.
+Intel uses -coarray=single for one image, or -coarray=shared together with
+-coarray-num-images=N for two or four. The compiler package already depends on
+Intel MPI. The trusted p2f-ifx-run wrapper initializes its environment before
+execution, including retained runs. Runtime settings specify FOR_COARRAY_NUM_IMAGES,
+I_MPI_FABRICS=shm, I_MPI_PIN=0 and I_MPI_WAIT_MODE=1. No network access is enabled.
+
+Flang 23 uses -fcoarray and LFortran 0.66 uses --coarray=true. Each has a separate
+Caffeine runtime built using its own compiler, linked after user code/objects,
+and launched directly with GASNET_PSHM_NODES=N, as specified by Caffeine 0.8.4's
+smp configuration. These implementations are experimental and incomplete; the
+frontend and runner display a note. GASNet uses the single-node smp conduit,
+GASNET_MAX_SEGSIZE=64M, GASNET_EXITTIMEOUT=2 and
+GASNET_BACKTRACE=0. No MPI or external network transport is used for these two.
+
+xinstall_caffeine.py pins Caffeine 0.8.4 and Assert 3.2.0 to exact commits and
+GASNet 2025.8.0 to a versioned archive verified by SHA-256. CMake 4.1.3 builds
+the runtime without FPM. A targeted installer workaround adds a missing space
+before LFortran's include flag, keeping Conda CFLAGS tokens separate.
+Image-owned link-flags.json is created only after a
+successful install. A failed runtime build clears that marker, prints a warning,
+and preserves ordinary compilation. Runtime layers follow helper builds so
+application/runtime edits do not recompile helpers. Runtime dependencies are
+never downloaded or rebuilt during user jobs. Installation diagnostics are
+retained in each runtime prefix's install.log.
+
+Deployment runs xverify_coarrays.py in each available GNU, Intel, Flang and LFortran image inside a
+network-blocked gVisor sandbox, with the same CPU and memory settings as jobs.
+The probe compiles/runs a synchronized coindexed exchange with counts 1, 2, 4.
+Only successful counts are exported through P2F_COMPILER_COARRAYS and session
+coarray_images catalogs. Compiler flags in returned metadata must exactly match
+the server allowlist. Probe errors clear support rather than guessing from the
+compiler version, preserving normal compilation. No user job triggers a probe.
+
+Requests with unavailable counts fail before job quota/provisioning. All images
+share one job's sandbox, CPU, memory, output cap and timeout. Execution sets
+GFORTRAN_NUM_IMAGES, GFORTRAN_SHARED_MEMORY_SIZE=64M, and
+GFORTRAN_IMAGE_RESTARTS_LIMIT=8, including for retained executables. Retained
+build metadata owns the image count; a rerun request cannot change it. GNU needs
+no MPI installation. Intel uses the MPI dependency installed with ifx; only image
+counts that pass the actual sandbox exchange are offered. Image settings are absent by
+default. Local API catalogs do not advertise unprobed coarray capabilities.
+
+For experimental Caffeine compilers, passing the basic exchange probe is not a
+claim that every coarray feature is implemented. The first deployment adds runtime
+build time; later deployments reuse those layers. Run Again retains the compiler,
+runtime, and image count. Additional options cannot supply libraries or launchers.
+
+Sandbox validation of the pinned LFortran image passed exchange with 1, 2, and
+4 images, plus both standalone playground coarray examples at two images and
+retained reruns. LFortran emits normal STOP lines at PRIF termination. These
+remain visible in user output; the deployment probe recognizes them without
+ignoring wrong image counts, other output, or nonzero exit status.
+
+The pinned Flang 23.1.5 runs the image-identification example but cannot lower
+references to coarray variables ("not yet implemented"). Its exchange probe
+therefore advertises no counts. The runtime integration is ready to be tested
+with a future compiler release; no weaker probe enables it prematurely.
+
+Reference:
+  https://gcc.gnu.org/onlinedocs/gfortran/Shared-memory-Coarrays.html

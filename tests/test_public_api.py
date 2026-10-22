@@ -44,6 +44,167 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_caffeine_compilers_only_offer_verified_flags(self):
+        self.service.compilers = ('gfortran', 'flang', 'lfortran')
+        self.service.compiler_coarrays = {'flang': {'2': ['-fcoarray'], '4': ['forged']},
+                                         'lfortran': {'2': ['--coarray=true']}}
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
+        for compiler in ('flang', 'lfortran'):
+            self.assertEqual(set(catalog[compiler]['coarray_images']), {'2'})
+            self.assertIn('Experimental', catalog[compiler]['coarray_note'])
+            payload = {'source': '', 'mode': 'fortran-edit', 'compiler': compiler,
+                       'fortran_source': 'print *, num_images()\nend\n', 'compiler_options': {'images': 4}}
+            rejected = self.client.post('/api/jobs', json=payload, headers=self.headers)
+            self.assertEqual(rejected.status_code, 400)
+            payload['compiler_options']['images'] = 2
+            accepted = self.client.post('/api/jobs', json=payload, headers=self.headers)
+            self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.assertEqual(self.store.data['board']['daily'], 2)
+
+    def test_intel_coarrays_are_verified_before_quota_and_survive_retained_rerun(self):
+        self.service.compilers = ('gfortran', 'ifx')
+        payload = {'source': '', 'mode': 'fortran-compile', 'compiler': 'ifx',
+                   'fortran_source': 'print *, num_images()\nend\n', 'retain_executable': True,
+                   'compiler_options': {'images': 2}}
+        self.assertEqual(self.client.post('/api/jobs', json=payload, headers=self.headers).status_code, 400)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        self.service.compiler_coarrays = {'ifx': {'2': ['-coarray=shared', '-coarray-num-images=2'],
+                                                 '4': ['-coarray=shared', '-coarray-num-images=8']}}
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']['ifx']['coarray_images']
+        self.assertEqual(catalog, {'2': ['-coarray=shared', '-coarray-num-images=2']})
+        created = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(created.status_code, 202, created.text)
+        self.runner.jobs['0']['result'] = {'ok': True, 'build': {'ok': True},
+                                         '_artifact': base64.b64encode(b'fake').decode()}
+        result = self.client.get('/api/jobs/' + created.json()['id'], headers=self.headers).json()['result']
+        rerun = self.client.post('/api/jobs', json={'source': '', 'mode': 'fortran-run',
+            'artifact_id': result['artifact']['id'], 'compiler_options': {'images': 4}}, headers=self.headers)
+        self.assertEqual(rerun.status_code, 202, rerun.text)
+        retained = self.runner.jobs['1']['payload']
+        self.assertEqual(retained['compiler'], 'ifx')
+        self.assertEqual(retained['compiler_options']['images'], 2)
+
+    def test_coarrays_require_exact_verified_capabilities_before_quota(self):
+        payload = {'source': '', 'mode': 'fortran-edit', 'compiler': 'gfortran',
+                   'fortran_source': 'print *, num_images()\nend\n', 'compiler_options': {'images': 2}}
+        rejected = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        self.service.compiler_coarrays = {'gfortran': {'1': ['-fcoarray=single'], '2': ['-fcoarray=lib'],
+                                                      '4': ['forged-flag']}}
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']['gfortran']['coarray_images']
+        self.assertEqual(set(catalog), {'1', '2'})
+        accepted = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.assertEqual(self.store.data['board']['daily'], 1)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler_options']['images'], 2)
+        rejected = self.client.post('/api/jobs', json={**payload, 'compiler_options': {'images': 4}}, headers=self.headers)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(self.store.data['board']['daily'], 1)
+
+    def test_retained_coarray_build_preserves_its_image_count(self):
+        self.service.compiler_coarrays = {'gfortran': {'2': ['-fcoarray=lib']}}
+        payload = {'source': '', 'mode': 'fortran-compile', 'compiler': 'gfortran',
+                   'fortran_source': 'print *, num_images()\nend\n', 'retain_executable': True,
+                   'compiler_options': {'images': 2}}
+        created = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(created.status_code, 202, created.text)
+        self.runner.jobs['0']['result'] = {'ok': True, 'build': {'ok': True},
+                                         '_artifact': base64.b64encode(b'fake').decode()}
+        result = self.client.get('/api/jobs/' + created.json()['id'], headers=self.headers).json()['result']
+        rerun = self.client.post('/api/jobs', json={'source': '', 'mode': 'fortran-run',
+            'artifact_id': result['artifact']['id'], 'compiler_options': {'images': 4}}, headers=self.headers)
+        self.assertEqual(rerun.status_code, 202, rerun.text)
+        self.assertEqual(self.runner.jobs['1']['payload']['compiler_options']['images'], 2)
+        self.assertEqual(self.store.data['board']['daily'], 2)
+
+    def test_gnu17_is_distinct_available_only_after_deployment(self):
+        payload = {'source': '', 'mode': 'fortran-edit', 'compiler': 'gfortran17',
+                   'fortran_source': 'print *, 42\nend\n', 'compiler_options': {'additional': ['-O3'], 'preprocess': True}}
+        response = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(self.runner.jobs)
+        self.service.compilers = ('gfortran', 'gfortran17')
+        self.service.compiler_versions['gfortran17'] = 'GNU Fortran (GCC) 17.0.0 20261018 (experimental)'
+        session = self.client.get('/api/session', headers=self.origin).json()
+        self.assertIn('gfortran17', session['compilers'])
+        self.assertIn('20261018', session['compiler_versions']['gfortran17'])
+        self.assertEqual(session['compiler_options']['gfortran17']['portable_options']['optimization']['3'], ['-O3'])
+        response = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler'], 'gfortran17')
+
+    OWNER_KEY = 'owner-test-key-' + 'x' * 32
+
+    def owner_headers(self):
+        self.service.owner_key = self.OWNER_KEY
+        return {**self.headers, 'X-P2F-Owner-Key': self.OWNER_KEY}
+
+    def test_owner_bypasses_usage_limits_without_charging_public_allowance(self):
+        headers = self.owner_headers()
+        board = self.store.data['board']
+        board['daily'] = public.MAX_DAILY
+        address = next(iter(board['sessions'].values()))['address']
+        board['rates'][address] = [self.now] * public.MAX_PER_ADDRESS
+        response = self.submit(headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        board = self.store.data['board']
+        self.assertEqual(board['daily'], public.MAX_DAILY)
+        self.assertEqual(len(board['rates'][address]), public.MAX_PER_ADDRESS)
+        self.assertEqual(board['owner_daily'], 1)
+        self.assertNotIn(self.OWNER_KEY, json.dumps(board))
+        self.assertNotIn(self.OWNER_KEY, json.dumps(self.runner.jobs))
+        self.assertEqual(self.submit().status_code, 429)  # Ordinary requests remain limited.
+
+    def test_owner_authentication_rejects_wrong_keys_and_payload_impersonation(self):
+        headers = self.owner_headers()
+        for invalid in ['wrong-key', 'x' * 257, self.OWNER_KEY[:-1] + 'y']:
+            response = self.submit({**headers, 'X-P2F-Owner-Key': invalid})
+            self.assertEqual(response.status_code, 403, response.text)
+            self.assertNotIn(invalid, response.text)
+        self.assertFalse(self.runner.jobs)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        self.store.data['board']['daily'] = public.MAX_DAILY
+        response = self.client.post('/api/jobs', json={'source': 'print(1)', 'mode': 'python',
+            'owner': True, 'owner_key': self.OWNER_KEY}, headers=self.headers)
+        self.assertEqual(response.status_code, 429)
+        self.assertFalse(self.runner.jobs)
+
+    def test_owner_still_obeys_concurrency_source_validation_and_session_ownership(self):
+        headers = self.owner_headers()
+        response = self.client.post('/api/jobs', json={'source': 'x' * 100001, 'mode': 'python'}, headers=headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.submit({**headers, 'X-P2F-Token': 'invalid'}).status_code, 403)
+        first = self.submit(headers)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(self.submit(headers).status_code, 202)
+        self.assertEqual(self.submit(headers).status_code, 429)
+        other = {**self.session(), 'X-P2F-Owner-Key': self.OWNER_KEY}
+        self.assertEqual(self.client.get('/api/jobs/' + first.json()['id'], headers=other).status_code, 404)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        self.assertEqual(self.store.data['board']['owner_daily'], 2)
+
+    def test_owner_feature_is_optional_and_key_never_returned(self):
+        response = self.client.get('/api/session', headers=self.origin)
+        self.assertFalse(response.json()['features']['owner_access'])
+        self.assertEqual(self.submit({**self.headers, 'X-P2F-Owner-Key': self.OWNER_KEY}).status_code, 403)
+        self.owner_headers()
+        response = self.client.get('/api/session', headers=self.origin)
+        self.assertTrue(response.json()['features']['owner_access'])
+        self.assertNotIn(self.OWNER_KEY, response.text)
+        preflight = self.client.options('/api/jobs', headers={**self.origin,
+            'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-p2f-owner-key'})
+        self.assertEqual(preflight.status_code, 200)
+
+    def test_owner_key_rotation_and_disabling_apply_to_existing_sessions(self):
+        headers = self.owner_headers()
+        self.service.owner_key = 'rotated-' + 'y' * 40
+        self.assertEqual(self.submit(headers).status_code, 403)
+        self.assertEqual(self.submit({**headers, 'X-P2F-Owner-Key': self.service.owner_key}).status_code, 202)
+        self.service.owner_key = ''
+        self.assertEqual(self.submit(headers).status_code, 403)
+        self.assertEqual(self.submit().status_code, 202)
+
     def test_additional_options_validate_before_sandbox_and_quota(self):
         catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
         self.assertIn(['-O2'], catalog['gfortran']['additional_options']['optimization'])

@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import time
 
@@ -30,21 +31,27 @@ MAX_PER_ADDRESS = 30  # over a ten-minute window; sessions share this allowance
 ORIGINS = ['https://beliavsky.github.io', 'http://127.0.0.1:8766', 'http://localhost:8766']
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 MODES = {'translate', 'annotate', 'format', 'check', 'python', 'fortran', 'both', 'compare', 'fortran-run'} | EDIT_MODES
-COMPILERS = {'gfortran', 'ifx', 'flang', 'lfortran', 'ofort'}
+COMPILERS = {'gfortran', 'gfortran17', 'ifx', 'flang', 'lfortran', 'ofort'}
 
 
 class PublicService:
     def __init__(self, store, runner, commit, clock=time.time, compilers=('gfortran',), runtime_namespace=None,
-                 compiler_versions=None, compiler_standards=None):
+                 compiler_versions=None, compiler_standards=None, owner_key='', compiler_coarrays=None):
         self.store, self.runner, self.commit, self.clock = store, runner, commit, clock
         self.lock = asyncio.Lock()
         self.compilers = tuple(compilers)
         self.compiler_versions = dict(compiler_versions or {})
         self.compiler_standards = dict(compiler_standards or {})
+        self.compiler_coarrays = dict(compiler_coarrays or {})
         self.runtime_namespace = runtime_namespace or commit
+        self.owner_key = owner_key
+        if owner_key and not re.fullmatch(r'[A-Za-z0-9_-]{32,256}', owner_key):
+            raise ValueError('P2F_OWNER_KEY must contain 32 to 256 URL-safe letters, digits, underscores, or hyphens.')
 
     def compiler_catalog(self):
-        return {name: {**spec, 'standards': {year: flags for year, flags in spec['standards'].items()
+        return {name: {**spec, 'coarray_images': {count: flags for count, flags in spec.get('coarray_images', {}).items()
+                    if self.compiler_coarrays.get(name, {}).get(count) == flags},
+                    'standards': {year: flags for year, flags in spec['standards'].items()
                     if self.compiler_standards.get(name, {}).get(year) == flags}}
                 for name, spec in OPTIONS.items()}
 
@@ -67,7 +74,7 @@ class PublicService:
                 del board['jobs'][identifier]
         day = time.strftime('%Y-%m-%d', time.gmtime(now))
         if board['day'] != day:
-            board['day'], board['daily'] = day, 0
+            board['day'], board['daily'], board['owner_daily'] = day, 0, 0
         return board
 
     def owner(self, board, token):
@@ -89,7 +96,8 @@ class PublicService:
             return {'token': token, 'commit': self.commit, 'timeout': 30, 'compiler': 'gfortran',
                     'compilers': list(self.compilers), 'hosted': True, 'compiler_options': self.compiler_catalog(), 'source_tools': True,
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
-                    'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True, 'artifact_ttl': ARTIFACT_TTL}}
+                    'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True,
+                                 'owner_access': bool(self.owner_key), 'artifact_ttl': ARTIFACT_TTL}}
 
     async def retain(self, board, job, result):
         blob = result.pop('_artifact', None)  # Never return executable bytes to browsers.
@@ -136,7 +144,13 @@ class PublicService:
                 job['state'] = 'done'
                 job['expires'] = self.clock() + 300
 
-    async def submit(self, token, payload):
+    async def submit(self, token, payload, owner_key=''):
+        exempt = False
+        if owner_key:
+            if (not self.owner_key or len(owner_key) > 256 or
+                    not hmac.compare_digest(self.owner_key.encode(), owner_key.encode())):
+                raise HTTPException(403, 'Invalid owner key. No job was submitted.')
+            exempt = True
         async with self.lock:
             board = await self.board()
             owner, session = self.owner(board, token)
@@ -161,19 +175,23 @@ class PublicService:
                 if name == 'ofort' and (payload.get('mode') not in {'fortran-edit', 'fortran-compile', 'format', 'check'}
                         or payload.get('retain_executable', False) or payload.get('automatic', False)):
                     raise ValueError('ofort supports standalone Fortran checks/runs only, without retained executables.')
-                user_flags(name, payload.get('compiler_options'), standards=self.compiler_catalog()[name]['standards'])
+                catalog = self.compiler_catalog()[name]
+                user_flags(name, payload.get('compiler_options'), standards=catalog['standards'], coarrays=catalog['coarray_images'])
             except ValueError as error:
                 raise HTTPException(400, str(error)) from error
             if sum(job['state'] in {'running', 'starting'} for job in board['jobs'].values()) >= MAX_ACTIVE:
                 await self.store.put('board', board)
                 raise HTTPException(429, 'Two jobs are already running. Wait briefly and try again.')
             recent = board['rates'].setdefault(session['address'], [])
-            if len(recent) >= MAX_PER_ADDRESS:
+            if not exempt and len(recent) >= MAX_PER_ADDRESS:
                 raise HTTPException(429, 'Too many jobs from this address. Try again in ten minutes.')
-            if board['daily'] >= MAX_DAILY:
+            if not exempt and board['daily'] >= MAX_DAILY:
                 raise HTTPException(429, 'The daily execution allowance has been reached. Try tomorrow (UTC).')
-            recent.append(self.clock())
-            board['daily'] += 1
+            if exempt:
+                board['owner_daily'] = board.get('owner_daily', 0) + 1
+            else:
+                recent.append(self.clock())
+                board['daily'] += 1
             identifier = secrets.token_urlsafe(24)
             metadata = {key: payload.get(key) for key in ('mode', 'compiler', 'compiler_options', 'retain_executable')}
             metadata['compiler'] = payload.get('compiler', 'gfortran')
@@ -232,7 +250,7 @@ def create_api(service):
 
     # Add last so CORS wraps error responses from the Origin middleware too.
     api.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
-                       allow_methods=['GET', 'POST'], allow_headers=['Content-Type', 'X-P2F-Token'])
+                       allow_methods=['GET', 'POST'], allow_headers=['Content-Type', 'X-P2F-Token', 'X-P2F-Owner-Key'])
 
     @api.get('/api/health')
     async def health():
@@ -287,7 +305,8 @@ def create_api(service):
         return await service.submit(token, {key: payload[key] for key in
             ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options', 'translation_options',
              'retain_executable', 'artifact_id') if key in payload
-            and (key != 'fortran_source' or mode in EDIT_MODES)})
+            and (key != 'fortran_source' or mode in EDIT_MODES)},
+            owner_key=request.headers.get('x-p2f-owner-key', ''))
 
     @api.get('/api/jobs/{identifier}')
     async def job(identifier: str, request: Request):
