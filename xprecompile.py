@@ -74,8 +74,12 @@ print *, mean(x)
 end program option_check
 '''
     for selection in selections:
+        source = ft
+        if selection.get('preprocess'):
+            source = ('#define PP_VALUE 42\n#if PP_VALUE != 42\n#error bad macro expansion\n#endif\n' +
+                      ft.replace('print *, mean(x)', 'print *, mean(x) + PP_VALUE - 42'))
         result = execute(runtime, '', 'fortran-edit', threading.Event(), compiler_name=compiler,
-                         compiler_options=selection, fortran_source=ft)
+                         compiler_options=selection, fortran_source=source)
         if (not result['ok'] or not result.get('precompiled_helpers')
                 or 'Build helper:' in result['build']['stdout']
                 or float(result['execution']['stdout']) != 2.0):

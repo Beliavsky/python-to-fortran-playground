@@ -642,3 +642,13 @@ changed toolchain, helper builder, numerical dependencies, or upstream bundle
 invalidates the helper-build layer. Formatter/linter packages are separate from
 all compiler images. The first deployment after restructuring can rebuild layers;
 later application updates reuse them, subject to Modal's cache availability.
+
+Fortran preprocessing
+---------------------
+The standalone Fortran frontend can request compiler_options.preprocess=true.
+It is an allowlisted boolean, off by default: GNU and LLVM Flang use -cpp,
+Linux ifx uses -fpp, and LFortran uses --cpp. ofort refuses preprocessing.
+Only submitted-source flags change; helper compilation/cache flags stay fixed.
+xprecompile.py verifies macro expansion and conditional compilation with cached
+helpers during image verification. Redeploy with xdeploy_service.py to publish
+the option before pushing the updated standalone frontend.

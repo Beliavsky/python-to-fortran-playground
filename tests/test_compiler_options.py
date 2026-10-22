@@ -1,6 +1,7 @@
 """Validate the public option vocabulary and real GNU compilation paths."""
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -22,7 +23,7 @@ class OptionTests(unittest.TestCase):
             _modules_defined_in_source=Mock(return_value=set()),
             resolve_helper_files_for_build=Mock(return_value=(['python.f90', 'lapack_d.f90'], [], [])))
         command = ['xcompile_fortran.py', '--runtime', '.', '--compiler',
-                   'gfortran -ffree-line-length-none', '--user-flags', '["-O3", "-Wall", "-std=f2008"]']
+                   'gfortran -ffree-line-length-none', '--user-flags', '["-O3", "-Wall", "-std=f2008", "-cpp"]']
         # Avoid importing an unrelated local transpiler or actually compiling.
         original_path = list(sys.path)
         try:
@@ -32,7 +33,7 @@ class OptionTests(unittest.TestCase):
                 self.assertEqual(xcompile_fortran.main(), 0)
                 self.assertEqual(helper.call_args.args[1], ['gfortran', '-ffree-line-length-none'])
                 self.assertEqual(run.call_args.args[0], ['gfortran', '-ffree-line-length-none',
-                    '-O3', '-Wall', '-std=f2008', 'python.o', 'lapack_d.o', 'input_p.f90', '-o', 'input_p.exe'])
+                    '-O3', '-Wall', '-std=f2008', '-cpp', 'python.o', 'lapack_d.o', 'input_p.f90', '-o', 'input_p.exe'])
         finally:
             sys.path[:] = original_path
 
@@ -41,7 +42,7 @@ class OptionTests(unittest.TestCase):
             self.assertEqual(user_flags(compiler), [])
             for invalid in ([], '-O3', {'preset': []}, {'preset': '-O3'},
                             {'flags': ['-fdefault-real-8']}, {'warnings': 'yes'},
-                            {'fast_math': 1}, {'include': '/tmp'}):
+                            {'fast_math': 1}, {'preprocess': 'yes'}, {'preprocess': 1}, {'include': '/tmp'}):
                 with self.subTest(compiler=compiler, selection=invalid):
                     with self.assertRaises(ValueError):
                         user_flags(compiler, invalid)
@@ -50,6 +51,56 @@ class OptionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             user_flags('lfortran', {'preset': 'optimized'})
         self.assertEqual(user_flags('lfortran', {'fast_math': True}), ['--fast'])
+
+    def test_preprocessing_flags_are_allowlisted_and_optional(self):
+        for name, expected in [('gfortran', '-cpp'), ('ifx', '-fpp'), ('flang', '-cpp'), ('lfortran', '--cpp')]:
+            self.assertEqual(user_flags(name, {'preprocess': True}), [expected])
+            self.assertEqual(user_flags(name, {'preprocess': False}), [])
+        with self.assertRaises(ValueError):
+            user_flags('ofort', {'preprocess': True})
+
+    @unittest.skipUnless(shutil.which('lfortran'), 'LFortran compiler required')
+    def test_lfortran_preprocessing_compiles_macro_and_conditional(self):
+        source = '''#define VALUE 42
+#if VALUE == 42
+program pp
+implicit none
+print *, VALUE
+end program pp
+#else
+this is deliberately invalid Fortran
+#endif
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / 'input_p.f90').write_text(source, encoding='utf-8')
+            for enabled in (False, True):
+                result = subprocess.run(['lfortran', *user_flags('lfortran', {'preprocess': enabled}),
+                    '-c', 'input_p.f90', '-o', 'probe.o'], cwd=path, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode == 0, enabled, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('gfortran'), 'GNU compiler required')
+    def test_gnu_preprocessing_changes_macro_and_conditional_behavior(self):
+        source = '''#define VALUE 42
+#if VALUE == 42
+program preprocess_test
+implicit none
+print *, VALUE
+end program preprocess_test
+#else
+this is deliberately invalid Fortran
+#endif
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            off = xrun.execute(runtime, '', 'fortran-edit', threading.Event(),
+                fortran_source=source, compiler_options={'preprocess': False})
+            self.assertFalse(off['ok'], off)
+            on = xrun.execute(runtime, '', 'fortran-edit', threading.Event(),
+                fortran_source=source, compiler_options={'preprocess': True})
+            self.assertTrue(on['ok'], on)
+            self.assertEqual(on['execution']['stdout'].strip(), '42')
+            self.assertIn('-cpp', on['build']['stdout'])
 
     def test_standard_selection_is_independent_of_presets_and_allowlisted(self):
         for compiler in OPTIONS:

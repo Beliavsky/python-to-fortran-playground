@@ -44,6 +44,19 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_preprocessing_is_advertised_and_validated(self):
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
+        self.assertEqual(catalog['gfortran']['extras']['preprocess'], ['-cpp'])
+        self.assertNotIn('preprocess', catalog['ofort']['extras'])
+        payload = {'source': '', 'fortran_source': '#define VALUE 42\nprint *, VALUE\nend\n',
+                   'mode': 'fortran-edit', 'compiler': 'gfortran', 'compiler_options': {'preprocess': True}}
+        result = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(result.status_code, 202, result.text)
+        self.assertTrue(self.runner.jobs['0']['payload']['compiler_options']['preprocess'])
+        payload['compiler_options']['preprocess'] = '-cpp'
+        result = self.client.post('/api/jobs', json=payload, headers=self.headers)
+        self.assertEqual(result.status_code, 400, result.text)
+
     def test_ofort_is_standalone_only_and_never_retains_a_binary(self):
         self.service.compilers = ('gfortran', 'ofort')
         payload = {'source': '', 'fortran_source': 'program main\nend program main\n',

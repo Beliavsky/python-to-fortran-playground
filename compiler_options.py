@@ -12,7 +12,7 @@ OPTIONS = {
         'standards': {year: ['-std=f' + ('95' if year == '1995' else year)]
                       for year in ('1995', '2003', '2008', '2018', '2023')},
         'standard_note': 'GNU rejects extensions beyond the selected standard; this does not guarantee complete language support.',
-        'extras': {'warnings': ['-Wall', '-Wextra'], 'fast_math': ['-ffast-math']},
+        'extras': {'warnings': ['-Wall', '-Wextra'], 'fast_math': ['-ffast-math'], 'preprocess': ['-cpp']},
         'note': 'Debug includes bounds and runtime checks. Strict adds pedantic diagnostics; select the standard separately.'},
     'ifx': {
         'presets': {'default': [], 'debug': ['-O0', '-g', '-check', 'all', '-traceback'],
@@ -21,25 +21,25 @@ OPTIONS = {
         'standards': {year: ['-stand', flag] for year, flag in
                       [('1995', 'f95'), ('2003', 'f03'), ('2008', 'f08'), ('2018', 'f18'), ('2023', 'f23')]},
         'standard_note': 'Intel reports standard-conformance warnings, rather than necessarily rejecting extensions.',
-        'extras': {'warnings': ['-warn', 'all'], 'fast_math': ['-fp-model', 'fast']},
+        'extras': {'warnings': ['-warn', 'all'], 'fast_math': ['-fp-model', 'fast'], 'preprocess': ['-fpp']},
         'note': 'Linux Intel options; Debug enables runtime checks. Strict adds warnings; select the standard separately.'},
     'flang': {
         'presets': {'default': [], 'debug': ['-O0', '-g'],
                     'optimized': ['-O3'], 'strict': ['-pedantic']},
-        'extras': {'fast_math': ['-ffast-math']},
+        'extras': {'fast_math': ['-ffast-math'], 'preprocess': ['-cpp']},
         'standards': {}, 'standard_note': 'No standard-selection options have been verified for this compiler.',
         'note': 'Debug adds symbols without promising GNU-style runtime checks. Strict enables pedantic diagnostics.'},
     'lfortran': {
-        'presets': {'default': []}, 'extras': {'fast_math': ['--fast']},
+        'presets': {'default': []}, 'extras': {'fast_math': ['--fast'], 'preprocess': ['--cpp']},
         'standards': {}, 'standard_note': 'No standard-selection options have been verified for this compiler.',
-        'note': 'Experimental: only Default and advanced --fast are offered; --fast enables additional optimization.'},
+        'note': 'Experimental: Default, preprocessing, and advanced --fast are offered; --fast enables additional optimization.'},
 }
 
 
 def user_flags(compiler, selection=None, *, standards=None):
     if selection is None:
         selection = {}
-    if not isinstance(selection, dict) or set(selection) - {'preset', 'warnings', 'fast_math', 'standard'}:
+    if not isinstance(selection, dict) or set(selection) - {'preset', 'warnings', 'fast_math', 'standard', 'preprocess'}:
         raise ValueError('Choose supported compiler options, not raw flags.')
     spec = OPTIONS[compiler]
     preset = selection.get('preset', 'default')
@@ -53,7 +53,7 @@ def user_flags(compiler, selection=None, *, standards=None):
         raise ValueError('This compiler does not support the selected standard.')
     if standard != 'default':
         flags.extend(spec['standards'][standard])
-    for key in ('warnings', 'fast_math'):
+    for key in ('warnings', 'fast_math', 'preprocess'):
         enabled = selection.get(key, False)
         if not isinstance(enabled, bool) or (enabled and key not in spec['extras']):
             raise ValueError('This compiler does not support the selected option.')
