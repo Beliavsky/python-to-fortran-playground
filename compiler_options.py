@@ -69,6 +69,21 @@ for name, groups in ADDITIONAL.items():
     OPTIONS[name]['additional_options'] = groups
 
 
+PORTABLE = {
+    'gfortran': {'optimization': {str(level): [f'-O{level}'] for level in range(4)},
+                 'bounds_check': {'true': ['-fcheck=bounds']},
+                 'backtrace': {'true': ['-fbacktrace']}},
+    'ifx': {'optimization': {str(level): [f'-O{level}'] for level in range(4)},
+            'bounds_check': {'true': ['-check', 'bounds']},
+            'backtrace': {'true': ['-traceback']}},
+    'flang': {'optimization': {str(level): [f'-O{level}'] for level in range(4)}},
+    'lfortran': {},
+    'ofort': {},
+}
+for name, mappings in PORTABLE.items():
+    OPTIONS[name]['portable_options'] = mappings
+
+
 def additional_flags(spec, flags, additional):
     """Validate bounded token lists against the same catalog advertised to clients."""
     if (not isinstance(additional, list) or len(additional) > 32 or

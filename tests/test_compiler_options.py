@@ -17,6 +17,19 @@ from xprecompile import precompile, verify_options
 
 
 class OptionTests(unittest.TestCase):
+    def test_portable_mappings_are_allowlisted(self):
+        for compiler, spec in OPTIONS.items():
+            for feature, values in spec['portable_options'].items():
+                for choice, flags in values.items():
+                    with self.subTest(compiler=compiler, feature=feature, choice=choice):
+                        self.assertEqual(user_flags(compiler, {'additional': flags}), flags)
+        self.assertEqual(OPTIONS['gfortran']['portable_options']['bounds_check']['true'], ['-fcheck=bounds'])
+        self.assertEqual(OPTIONS['ifx']['portable_options']['bounds_check']['true'], ['-check', 'bounds'])
+        self.assertEqual(OPTIONS['flang']['portable_options']['optimization']['3'], ['-O3'])
+        self.assertNotIn('bounds_check', OPTIONS['flang']['portable_options'])
+        self.assertEqual(OPTIONS['ofort']['portable_options'], {})
+        self.assertEqual(OPTIONS['lfortran']['portable_options'], {})
+
     def test_additional_options_allowlists_and_conflicts(self):
         self.assertEqual(user_flags('gfortran', {'additional': ['-O2', '-Wall', '-fcheck=all']}),
                          ['-O2', '-Wall', '-fcheck=all'])

@@ -673,3 +673,20 @@ Validation uses in-memory catalogs without compiler probes, extra sandboxes, or
 new API requests. Selected flags can change actual build/run times. Redeploy
 with .venv-execution\Scripts\python.exe xdeploy_service.py before publishing the
 standalone frontend; this refreshes the API and worker images together.
+
+Portable runner options
+-----------------------
+Session catalogs also advertise portable_options: per-compiler mappings from
+intent and value to allowlisted arguments. Optimization levels 0-3 are mapped
+for GNU, ifx, and Flang. Bounds checks and runtime backtraces are mapped for
+GNU and ifx. No equivalent mappings are currently advertised for LFortran or
+ofort. Mappings express comparable intentions, not identical compiler behavior.
+
+The standalone Python runner supports --optimization (aliases --O and -O),
+--bounds-check, and --backtrace, plus a common JSON options-file object using
+optimization, bounds_check, and backtrace keys. CLI values override common
+defaults. Translated flags are sent as additional options, so existing server
+validation rejects conflicts before provisioning or quota charging. Clients
+must reject unavailable mappings before submitting their first job. Redeploy
+with xdeploy_service.py to publish the new catalog; no extra sandbox work or
+API requests are needed to translate options.
