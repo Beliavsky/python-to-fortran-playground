@@ -77,11 +77,20 @@ PORTABLE = {
             'bounds_check': {'true': ['-check', 'bounds']},
             'backtrace': {'true': ['-traceback']}},
     'flang': {'optimization': {str(level): [f'-O{level}'] for level in range(4)}},
-    'lfortran': {},
-    'ofort': {},
+    'lfortran': {'optimization': {str(level): ['--fast'] if level else [] for level in range(4)}},
+    'ofort': {'optimization': {str(level): [] for level in range(4)}},
 }
 for name, mappings in PORTABLE.items():
     OPTIONS[name]['portable_options'] = mappings
+
+OPTIONS['lfortran']['portable_option_notes'] = {'optimization': {
+    str(level): (f'optimization level {level} mapped to --fast; numbered levels are unavailable; '
+                 'strict standard compliance is relaxed.' if level else
+                 'optimization level 0 uses default mode; numbered levels are unavailable.')
+    for level in range(4)}}
+OPTIONS['ofort']['portable_option_notes'] = {'optimization': {
+    str(level): f'optimization level {level} ignored; interpreter has no equivalent.'
+    for level in range(4)}}
 
 
 def additional_flags(spec, flags, additional):

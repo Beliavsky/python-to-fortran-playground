@@ -49,6 +49,9 @@ class PublicTests(unittest.TestCase):
         self.assertIn(['-O2'], catalog['gfortran']['additional_options']['optimization'])
         self.assertEqual(catalog['gfortran']['portable_options']['optimization']['3'], ['-O3'])
         self.assertEqual(catalog['gfortran']['portable_options']['bounds_check']['true'], ['-fcheck=bounds'])
+        self.assertEqual(catalog['lfortran']['portable_options']['optimization']['3'], ['--fast'])
+        self.assertEqual(catalog['ofort']['portable_options']['optimization']['3'], [])
+        self.assertIn('ignored', catalog['ofort']['portable_option_notes']['optimization']['3'])
         payload = {'source': '', 'fortran_source': 'print *, 42\nend\n', 'mode': 'fortran-edit',
                    'compiler': 'gfortran'}
         before = copy.deepcopy(self.store.data['board'])

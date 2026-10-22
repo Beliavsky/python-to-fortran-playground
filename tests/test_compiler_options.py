@@ -27,8 +27,12 @@ class OptionTests(unittest.TestCase):
         self.assertEqual(OPTIONS['ifx']['portable_options']['bounds_check']['true'], ['-check', 'bounds'])
         self.assertEqual(OPTIONS['flang']['portable_options']['optimization']['3'], ['-O3'])
         self.assertNotIn('bounds_check', OPTIONS['flang']['portable_options'])
-        self.assertEqual(OPTIONS['ofort']['portable_options'], {})
-        self.assertEqual(OPTIONS['lfortran']['portable_options'], {})
+        for level in range(4):
+            self.assertEqual(OPTIONS['ofort']['portable_options']['optimization'][str(level)], [])
+            self.assertEqual(OPTIONS['lfortran']['portable_options']['optimization'][str(level)],
+                             ['--fast'] if level else [])
+            self.assertIn('ignored', OPTIONS['ofort']['portable_option_notes']['optimization'][str(level)])
+        self.assertIn('compliance is relaxed', OPTIONS['lfortran']['portable_option_notes']['optimization']['3'])
 
     def test_additional_options_allowlists_and_conflicts(self):
         self.assertEqual(user_flags('gfortran', {'additional': ['-O2', '-Wall', '-fcheck=all']}),

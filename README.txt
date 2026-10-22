@@ -679,8 +679,12 @@ Portable runner options
 Session catalogs also advertise portable_options: per-compiler mappings from
 intent and value to allowlisted arguments. Optimization levels 0-3 are mapped
 for GNU, ifx, and Flang. Bounds checks and runtime backtraces are mapped for
-GNU and ifx. No equivalent mappings are currently advertised for LFortran or
-ofort. Mappings express comparable intentions, not identical compiler behavior.
+GNU and ifx. LFortran maps level 0 to default mode and levels 1-3 to --fast,
+which relaxes strict standard compliance. ofort accepts levels 0-3 without
+adding flags because it has no equivalent interpreter setting. The catalog's
+portable_option_notes supplies explanations for both tools; the runner prints
+these even with --terse. Mappings express comparable intentions, not identical
+compiler behavior. Unsupported bounds checks and backtraces remain errors.
 
 The standalone Python runner supports --optimization (aliases --O and -O),
 --bounds-check, and --backtrace, plus a common JSON options-file object using
