@@ -44,6 +44,24 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_additional_options_validate_before_sandbox_and_quota(self):
+        catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
+        self.assertIn(['-O2'], catalog['gfortran']['additional_options']['optimization'])
+        payload = {'source': '', 'fortran_source': 'print *, 42\nend\n', 'mode': 'fortran-edit',
+                   'compiler': 'gfortran'}
+        before = copy.deepcopy(self.store.data['board'])
+        for selection in [{'additional': ['-o', 'other.exe']},
+                          {'preset': 'debug', 'additional': ['-O2']}]:
+            response = self.client.post('/api/jobs', json={**payload, 'compiler_options': selection}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertFalse(self.runner.jobs)
+            self.assertEqual(self.store.data['board']['daily'], before['daily'])
+            self.assertEqual(self.store.data['board']['rates'], before['rates'])
+        response = self.client.post('/api/jobs', json={**payload,
+            'compiler_options': {'additional': ['-O2', '-Wall']}}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['compiler_options']['additional'], ['-O2', '-Wall'])
+
     def test_preprocessing_is_advertised_and_validated(self):
         catalog = self.client.get('/api/session', headers=self.origin).json()['compiler_options']
         self.assertEqual(catalog['gfortran']['extras']['preprocess'], ['-cpp'])

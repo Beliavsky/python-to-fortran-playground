@@ -17,6 +17,36 @@ from xprecompile import precompile, verify_options
 
 
 class OptionTests(unittest.TestCase):
+    def test_additional_options_allowlists_and_conflicts(self):
+        self.assertEqual(user_flags('gfortran', {'additional': ['-O2', '-Wall', '-fcheck=all']}),
+                         ['-O2', '-Wall', '-fcheck=all'])
+        self.assertEqual(user_flags('ifx', {'additional': ['-O2', '-warn', 'all']}),
+                         ['-O2', '-warn', 'all'])
+        self.assertEqual(user_flags('gfortran', {'warnings': True, 'additional': ['-Wall']}),
+                         ['-Wall', '-Wextra', '-Wall'])
+        for compiler in OPTIONS:
+            for invalid in ['-O2', None, [None], ['-o', 'anything'], ['@response'], ['-I/tmp'],
+                            ['-fdefault-real-8'], ['-O2;echo bad'], ['-O2'] * 33, ['x' * 129]]:
+                with self.subTest(compiler=compiler, invalid=invalid), self.assertRaises(ValueError):
+                    user_flags(compiler, {'additional': invalid})
+        for compiler, selection in [
+                ('gfortran', {'preset': 'debug', 'additional': ['-O2']}),
+                ('gfortran', {'additional': ['-O2', '-O3']}),
+                ('ifx', {'preset': 'optimized', 'additional': ['-fp-model', 'fast']}),
+                ('ifx', {'additional': ['-warn']}), ('ofort', {'additional': ['-O2']})]:
+            with self.subTest(compiler=compiler, selection=selection), self.assertRaises(ValueError):
+                user_flags(compiler, selection)
+
+    @unittest.skipUnless(shutil.which('gfortran'), 'GNU compiler required')
+    def test_additional_gnu_options_compile_and_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = xrun.execute(Path(directory), '', 'fortran-edit', threading.Event(),
+                fortran_source='program demo\nimplicit none\nprint *, 42\nend program demo\n',
+                compiler_options={'additional': ['-O2', '-Wall', '-fcheck=all']})
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(result['execution']['stdout'].strip(), '42')
+            self.assertIn('-O2 -Wall -fcheck=all', result['build']['stdout'])
+
     def test_cold_helpers_receive_only_baseline_flags(self):
         helper = Mock(return_value=(['python.o', 'lapack_d.o'], None, None))
         fake = SimpleNamespace(_prepare_helper_link_inputs=helper,

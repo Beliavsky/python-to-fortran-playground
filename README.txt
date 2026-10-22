@@ -652,3 +652,24 @@ Only submitted-source flags change; helper compilation/cache flags stay fixed.
 xprecompile.py verifies macro expansion and conditional compilation with cached
 helpers during image verification. Redeploy with xdeploy_service.py to publish
 the option before pushing the updated standalone frontend.
+
+Additional compiler options
+---------------------------
+Session compiler catalogs now advertise additional_options: groups of supported
+choices, each choice a list of command arguments. Clients may submit
+compiler_options.additional as a list, for example ["-O2", "-Wall"] for GNU or
+["-O2", "-warn", "all"] for Intel. The standalone frontend provides an Advanced
+text field; its Python runner accepts a per-compiler JSON --options-file.
+
+These arguments supplement preset, standard, and checkbox selections. Unlisted
+arguments and conflicting additional settings are rejected by user_flags before
+sandbox provisioning or quota charging, then checked again in the worker.
+Identical repeated choices are accepted. Use the existing standard selector for
+language standards. ofort has no additional options. The limit is 32 arguments
+of at most 128 characters; no paths, plugins, response files, output controls,
+or ABI-changing flags are allowed. Helpers retain their baseline build flags.
+
+Validation uses in-memory catalogs without compiler probes, extra sandboxes, or
+new API requests. Selected flags can change actual build/run times. Redeploy
+with .venv-execution\Scripts\python.exe xdeploy_service.py before publishing the
+standalone frontend; this refreshes the API and worker images together.
