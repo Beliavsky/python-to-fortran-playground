@@ -827,3 +827,21 @@ with a future compiler release; no weaker probe enables it prematurely.
 
 Reference:
   https://gcc.gnu.org/onlinedocs/gfortran/Shared-memory-Coarrays.html
+
+PROGRAM INPUT (STDIN)
+
+Sessions advertise features.stdin=true and max_stdin_bytes=100000. Execution
+requests may include a UTF-8 stdin string up to that byte limit, including
+fortran-edit and fortran-run. Compile-only and source-tool operations reject
+nonempty input. Validation occurs before quota charging or sandbox creation.
+The worker supplies a finite temporary file as standard input and EOF follows
+the final byte. Empty or absent input uses the null device. This avoids input
+pipe deadlocks when a program never reads input and preserves cancellation,
+timeouts, output limits, sandbox isolation, and existing job quotas.
+
+Run Again accepts fresh input; retained build metadata does not store input.
+Both Python and Fortran execution receive independent copies in comparison
+operations. Input is not sent to compilers, formatters, or linters. This is batch
+input, not an interactive terminal. Coarray programs should read on image 1
+and distribute values to other images. Redeploy xdeploy_service.py to enable
+stdin on the hosted API; no extra sandbox launches are needed per job.

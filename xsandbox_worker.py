@@ -33,7 +33,7 @@ def main():
                          compiler_options=payload.get('compiler_options'),
                          translation_options=payload.get('translation_options'),
                          retain_executable=payload.get('retain_executable', False),
-                         executable=payload.get('executable'))
+                         executable=payload.get('executable'), stdin=payload.get('stdin', ''))
     except Exception as error:
         result = {'ok': False, 'error': str(error)}
     # Return results only; do not separately log submitted input. Annotation

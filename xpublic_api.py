@@ -19,8 +19,9 @@ from fastapi.responses import JSONResponse
 from compiler_options import OPTIONS, user_flags
 from translation_options import validate_options
 
-MAX_REQUEST = 1_300_000
+MAX_REQUEST = 1_900_000  # Two sources and stdin, including JSON escaping.
 MAX_SOURCE = 100_000
+MAX_STDIN = 100_000
 MAX_RESULT = 8_000_000  # Includes the private, bounded executable export.
 MAX_EXECUTABLE = 4 * 1024 * 1024
 ARTIFACT_TTL = 300
@@ -97,6 +98,7 @@ class PublicService:
                     'compilers': list(self.compilers), 'hosted': True, 'compiler_options': self.compiler_catalog(), 'source_tools': True,
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
                     'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True,
+                                 'stdin': True, 'max_stdin_bytes': MAX_STDIN,
                                  'owner_access': bool(self.owner_key), 'artifact_ttl': ARTIFACT_TTL}}
 
     async def retain(self, board, job, result):
@@ -282,6 +284,10 @@ def create_api(service):
             source, mode = payload.get('source', ''), payload.get('mode')
             compiler = payload.get('compiler', 'gfortran')
             ft_source = payload.get('fortran_source')
+            stdin = payload.get('stdin', '')
+            if (not isinstance(stdin, str) or len(stdin.encode('utf-8')) > MAX_STDIN
+                    or (stdin and mode in ('translate', 'annotate', 'format', 'check', 'fortran-compile'))):
+                raise HTTPException(400, 'Program input must be UTF-8 text up to 100 KB, for an execution operation.')
             if (not isinstance(mode, str) or mode not in MODES
                     or not isinstance(source, str) or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile', 'fortran-run'}) or len(source.encode()) > MAX_SOURCE
                     or (mode in EDIT_MODES and (not isinstance(ft_source, str) or not ft_source.strip()
@@ -304,7 +310,7 @@ def create_api(service):
             raise HTTPException(400, str(error))
         return await service.submit(token, {key: payload[key] for key in
             ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options', 'translation_options',
-             'retain_executable', 'artifact_id') if key in payload
+             'retain_executable', 'artifact_id', 'stdin') if key in payload
             and (key != 'fortran_source' or mode in EDIT_MODES)},
             owner_key=request.headers.get('x-p2f-owner-key', ''))
 

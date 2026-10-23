@@ -2,6 +2,7 @@
 import argparse
 import base64
 import codeop
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from functools import lru_cache
 import hashlib
@@ -26,6 +27,7 @@ from translation_options import validate_options, cli_options, strip_fortran_com
 
 ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
+MAX_STDIN = 100_000
 MAX_OUTPUT = 200_000
 EDIT_MODES = {'fortran-edit', 'both-edit', 'compare-edit', 'fortran-compile'}
 COMPILE_MODES = {'fortran', 'both', 'compare'} | EDIT_MODES
@@ -207,7 +209,7 @@ def stop_process(process):
             pass
 
 
-def run_command(command, cwd, cancel, timeout, *, env=None):
+def run_command(command, cwd, cancel, timeout, *, env=None, stdin=''):
     """Bound captured output while draining both pipes; stop the entire process tree."""
     started = time.perf_counter()
     options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
@@ -215,9 +217,17 @@ def run_command(command, cwd, cancel, timeout, *, env=None):
     if cancel.is_set():
         return {**result, "stderr": "Cancelled.\n"}
     try:
-        process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", **(env or {})}, **options)
+        # A finite file avoids blocking on a full input pipe when a program
+        # never reads stdin. The child receives EOF after the supplied bytes.
+        with ExitStack() as stack:
+            input_stream = subprocess.DEVNULL
+            if stdin:
+                input_stream = stack.enter_context(tempfile.TemporaryFile())
+                input_stream.write(stdin.encode('utf-8'))
+                input_stream.seek(0)
+            process = subprocess.Popen(command, cwd=cwd, stdin=input_stream,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", **(env or {})}, **options)
     except OSError as error:
         return {**result, "stderr": str(error), "seconds": time.perf_counter() - started}
     buffers = [bytearray(), bytearray()]
@@ -286,10 +296,16 @@ def fortitude_command():
 
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
             compiler_name="gfortran", fortran_source=None, compiler_options=None, translation_options=None,
-            retain_executable=False, executable=None):
+            retain_executable=False, executable=None, stdin=''):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
+    try:
+        if (not isinstance(stdin, str) or len(stdin.encode('utf-8')) > MAX_STDIN
+                or (stdin and mode in {'translate', 'annotate', 'format', 'check', 'fortran-compile'})):
+            raise ValueError()
+    except (ValueError, UnicodeError):
+        return {**result, 'error': 'Program input must be UTF-8 text up to 100 KB, for an execution operation.'}
     if mode in {'format', 'check'}:
         if (automatic or not isinstance(source, str) or not source.strip()
                 or len(source.encode('utf-8')) > MAX_SOURCE):
@@ -332,7 +348,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             if mode == 'fortran-compile':
                 result['build'] = run_command(shlex.split(DEFAULT_OFORT) + ['--check', 'input.f90'], job, cancel, timeout)
             else:
-                result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout)
+                result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout, stdin=stdin)
         result.update(ok=all(result[key]['ok'] for key in ('build', 'execution') if key in result)
                       and not cancel.is_set(), seconds=time.perf_counter() - started)
         return result
@@ -366,7 +382,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             exe = Path(directory) / 'input_p.exe'
             exe.write_bytes(binary)
             exe.chmod(0o700)
-            result['execution'] = run_command(coarray_command(compiler_name, exe, images), Path(directory), cancel, timeout, env=execution_env)
+            result['execution'] = run_command(coarray_command(compiler_name, exe, images), Path(directory), cancel, timeout, env=execution_env, stdin=stdin)
         result.update(ok=result['execution']['ok'], reused_executable=True,
                       translation_options=None, seconds=time.perf_counter() - started)
         return result
@@ -426,7 +442,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
                 result['build']['stderr'] = translated['stderr'] + result['build']['stderr']
                 result['build']['seconds'] += translated['seconds']
         if mode in {"python", "both", "compare", 'both-edit', 'compare-edit'}:
-            result["python"] = run_command([sys.executable, "input.py"], py, cancel, timeout)
+            result["python"] = run_command([sys.executable, "input.py"], py, cancel, timeout, stdin=stdin)
         if (retain_executable and mode in {'fortran-compile', 'fortran-edit'}
                 and result.get('build', {}).get('ok') and not cancel.is_set()):
             exe = ft / 'input_p.exe'
@@ -444,7 +460,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         if mode in COMPILE_MODES and mode != 'fortran-compile' and result["build"]["ok"]:
             # The pinned upstream CLI uses .exe on every platform.
             exe = ft / "input_p.exe"
-            result["execution"] = run_command(coarray_command(compiler_name, exe, images), ft, cancel, timeout, env=execution_env)
+            result["execution"] = run_command(coarray_command(compiler_name, exe, images), ft, cancel, timeout, env=execution_env, stdin=stdin)
         stages = [result[key]["ok"] for key in ("build", "python", "execution") if key in result]
         result["ok"] = bool(stages) and all(stages) and not cancel.is_set()
         if mode in {'compare', 'compare-edit'} and result["ok"]:
@@ -486,7 +502,7 @@ class ExecutionServer(ThreadingHTTPServer):
                                  compiler_name=payload.get("compiler", "gfortran"),
                                  fortran_source=payload.get('fortran_source'),
                                  compiler_options=payload.get('compiler_options'),
-                                 translation_options=payload.get('translation_options'))
+                                 translation_options=payload.get('translation_options'), stdin=payload.get('stdin', ''))
             except Exception as error:
                 result = {"ok": False, "error": str(error)}
             with self.lock:
@@ -532,7 +548,8 @@ class Handler(SimpleHTTPRequestHandler):
                              "compilers": compilers, 'compiler_options': compiler_catalog(self.server.runtime, compilers, self.server.compiler),
                              'compiler_versions': {name: compiler_version(self.server.runtime, name,
                                  compiler_command(name, self.server.compiler)) for name in compilers},
-                             'source_tools': True, 'features': {'format': importlib.util.find_spec('fprettify') is not None,
+                             'source_tools': True, 'features': {'stdin': True, 'max_stdin_bytes': MAX_STDIN,
+                                                               'format': importlib.util.find_spec('fprettify') is not None,
                                                                'check': Path(fortitude_command()).is_file() or shutil.which(fortitude_command()) is not None}})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
@@ -554,7 +571,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 1_300_000:
+            if not 0 < length <= 1_900_000:
                 raise ValueError("Request exceeds the input limit")
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
@@ -569,14 +586,17 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 valid_source = isinstance(source, str) and len(source.encode()) <= MAX_SOURCE
                 valid_ft = isinstance(ft_source, str) and bool(ft_source.strip()) and len(ft_source.encode()) <= MAX_SOURCE
+                stdin = payload.get('stdin', '')
+                valid_stdin = isinstance(stdin, str) and len(stdin.encode('utf-8')) <= MAX_STDIN
             except UnicodeError:
-                valid_source = valid_ft = False
+                valid_source = valid_ft = valid_stdin = False
             if (not isinstance(mode, str) or mode not in MODES
                     or not valid_source or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
                     or (mode in {'format', 'check'} and payload.get('automatic', False))
                     or not isinstance(choice, str) or choice not in COMPILERS
-                    or not isinstance(payload.get("automatic", False), bool)):
+                    or not isinstance(payload.get("automatic", False), bool)
+                    or not valid_stdin or (stdin and mode in {'translate', 'annotate', 'format', 'check', 'fortran-compile'})):
                 self.reply(400, {"error": "Enter valid source (up to 100 KB per language) and a valid operation."})
                 return
             payload['source'] = source

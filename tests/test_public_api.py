@@ -44,6 +44,28 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_stdin_validation_and_retained_runs(self):
+        features = self.client.get('/api/session', headers=self.origin).json()['features']
+        self.assertTrue(features['stdin'])
+        self.assertEqual(features['max_stdin_bytes'], 100000)
+        payload = {'source': '', 'mode': 'fortran-edit', 'fortran_source': 'end\n'}
+        for value in [None, [], {}, 42, 'é' * 50001]:
+            response = self.client.post('/api/jobs', json={**payload, 'stdin': value}, headers=self.headers)
+            self.assertEqual(response.status_code, 400, response.text)
+        response = self.client.post('/api/jobs', json={**payload, 'mode': 'fortran-compile', 'stdin': '1\n'}, headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.store.data['board']['daily'], 0)
+        self.assertFalse(self.runner.jobs)
+        artifact = self.retained_build()
+        response = self.client.post('/api/jobs', json={**payload, 'stdin': 'é' * 50000}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['1']['payload']['stdin'], 'é' * 50000)
+        rerun = self.client.post('/api/jobs', json={'mode': 'fortran-run', 'artifact_id': artifact['id'],
+                                                  'stdin': '7 8\n'}, headers=self.headers)
+        self.assertEqual(rerun.status_code, 202, rerun.text)
+        self.assertEqual(self.runner.jobs['2']['payload']['stdin'], '7 8\n')
+        self.assertNotIn('stdin', next(iter(self.store.data['board']['artifacts'].values())))
+
     def test_caffeine_compilers_only_offer_verified_flags(self):
         self.service.compilers = ('gfortran', 'flang', 'lfortran')
         self.service.compiler_coarrays = {'flang': {'2': ['-fcoarray'], '4': ['forged']},
