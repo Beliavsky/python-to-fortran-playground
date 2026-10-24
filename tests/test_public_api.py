@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -44,6 +45,24 @@ class Sandboxes:
 
 
 class PublicTests(unittest.TestCase):
+    def test_external_source_requires_session_and_has_separate_address_limit(self):
+        result = {'source': 'module sample\nend module\n', 'filename': 'sample.f90',
+                  'url': 'https://example.org/sample.f90', 'sha256': 'a' * 64}
+        def load(headers):
+            return self.client.post('/api/external-source', json={'url': result['url']}, headers=headers)
+        with patch.object(public, 'fetch_source', return_value=result) as fetch:
+            self.assertEqual(load(self.origin).status_code, 403)
+            self.assertEqual(load({**self.origin, 'X-P2F-Token': 'invalid'}).status_code, 403)
+            self.assertEqual(load(self.headers).json(), result)
+            self.assertEqual(self.store.data['board']['daily'], 0)
+            self.assertFalse(self.runner.jobs)
+            for _ in range(29):
+                self.assertEqual(load(self.headers).status_code, 200)
+            self.assertEqual(load(self.session()).status_code, 429)
+            self.assertEqual(fetch.call_count, 30)
+        rejected = self.client.post('/api/external-source', json={'url': 'http://127.0.0.1'}, headers=self.headers)
+        self.assertEqual(rejected.status_code, 400)
+
     def test_stdin_validation_and_retained_runs(self):
         features = self.client.get('/api/session', headers=self.origin).json()['features']
         self.assertTrue(features['stdin'])

@@ -200,6 +200,19 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_COARRAYS']), {})
         self.assertIn('gfortran', json.loads(deploy.call_args.kwargs['env']['P2F_COMPILER_VERSIONS']))
 
+    def test_intel_probe_uses_network_blocked_vm(self):
+        sandbox = Mock(returncode=0)
+        sandbox.stdout.read.return_value = '{"2":["-coarray=shared","-coarray-num-images=2"]}'
+        with patch.object(xdeploy_service.modal.Sandbox, 'create', return_value=sandbox) as create, \
+                patch.object(xdeploy_service.modal.Image, 'from_name'):
+            result = xdeploy_service.read_coarray_support(Mock(), 'image', 'ifx')
+        self.assertIn('2', result)
+        self.assertEqual(create.call_args.kwargs['runtime'], 'vm')
+        self.assertTrue(create.call_args.kwargs['block_network'])
+        self.assertEqual(create.call_args.kwargs['secrets'], [])
+        self.assertEqual(create.call_args.kwargs['volumes'], {})
+        sandbox.terminate.assert_called_once()
+
     def test_version_reader_failure_still_cleans_up(self):
         sandbox = Mock(returncode=1)
         with patch.object(xdeploy_service.modal.Sandbox, 'create', return_value=sandbox), \

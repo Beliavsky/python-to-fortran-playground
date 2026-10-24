@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from compiler_options import OPTIONS, user_flags
 from translation_options import validate_options
+from xexternal_source import fetch_source, source_url
 
 MAX_REQUEST = 1_900_000  # Two sources and stdin, including JSON escaping.
 MAX_SOURCE = 100_000
@@ -46,6 +47,7 @@ class PublicService:
         self.compiler_coarrays = dict(compiler_coarrays or {})
         self.runtime_namespace = runtime_namespace or commit
         self.owner_key = owner_key
+        self.external_loads = 0
         if owner_key and not re.fullmatch(r'[A-Za-z0-9_-]{32,256}', owner_key):
             raise ValueError('P2F_OWNER_KEY must contain 32 to 256 URL-safe letters, digits, underscores, or hyphens.')
 
@@ -68,7 +70,8 @@ class PublicService:
                     or artifact['runtime'] != self.runtime_namespace):
                 await self.store.pop('artifact:' + identifier)
                 del artifacts[identifier]
-        board['rates'] = {k: [t for t in times if t > now - 600] for k, times in board['rates'].items() if times and times[-1] > now - 600}
+        for field in ('rates', 'source_loads'):
+            board[field] = {k: [t for t in times if t > now - 600] for k, times in board.get(field, {}).items() if times and times[-1] > now - 600}
         for identifier, job in list(board['jobs'].items()):
             if job['expires'] < now:
                 await self.store.pop('result:' + identifier)
@@ -99,7 +102,35 @@ class PublicService:
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
                     'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True,
                                  'stdin': True, 'max_stdin_bytes': MAX_STDIN,
+                                 'external_source': True,
                                  'owner_access': bool(self.owner_key), 'artifact_ttl': ARTIFACT_TTL}}
+
+    async def external_source(self, token, url):
+        try:
+            source_url(url)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        async with self.lock:
+            board = await self.board()
+            _, session = self.owner(board, token)
+            recent = board['source_loads'].setdefault(session['address'], [])
+            if self.external_loads >= 2 or len(recent) >= 30:
+                raise HTTPException(429, 'Source downloads are busy or this address has reached 30 loads in ten minutes.')
+            recent.append(self.clock())
+            await self.store.put('board', board)
+            self.external_loads += 1
+        task = asyncio.create_task(asyncio.to_thread(fetch_source, url))
+        def finished(task):
+            self.external_loads -= 1
+            if not task.cancelled():
+                task.exception()  # Retrieve exceptions even after a request times out.
+        task.add_done_callback(finished)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), 20)
+        except asyncio.TimeoutError:
+            raise HTTPException(504, 'External source download timed out.') from None
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
 
     async def retain(self, board, job, result):
         blob = result.pop('_artifact', None)  # Never return executable bytes to browsers.
@@ -264,6 +295,26 @@ def create_api(service):
         # Use the ASGI peer supplied by the hosting platform; do not trust an
         # arbitrary user-supplied X-Forwarded-For header for rate limiting.
         return await service.session(request.client.host if request.client else 'unknown')
+
+    @api.post('/api/external-source')
+    async def external_source(request: Request):
+        token = request.headers.get('x-p2f-token', '')
+        if not token or len(token) > 100:
+            raise HTTPException(403, 'Click Reconnect before loading external source.')
+        if request.headers.get('content-type') != 'application/json':
+            raise HTTPException(415, 'Expected application/json')
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > 8192:
+                raise HTTPException(413, 'Source URL request is too large.')
+        try:
+            payload = json.loads(content)
+            if not isinstance(payload, dict) or set(payload) != {'url'}:
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise HTTPException(400, 'Supply one external source URL.') from None
+        return await service.external_source(token, payload['url'])
 
     @api.post('/api/jobs', status_code=202)
     async def submit(request: Request):

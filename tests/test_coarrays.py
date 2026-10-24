@@ -99,9 +99,14 @@ class CoarrayTests(unittest.TestCase):
                              compiler_options={'images': 2},
                              executable=base64.b64encode(b'fake-binary').decode())
                 self.assertEqual(run.call_args.args[0][0], 'p2f-ifx-run')
-                self.assertEqual(run.call_args.kwargs['env'], {
-                    'FOR_COARRAY_NUM_IMAGES': '2', 'I_MPI_FABRICS': 'shm',
-                    'I_MPI_PIN': '0', 'I_MPI_WAIT_MODE': '1'})
+                environment = run.call_args.kwargs['env']
+                self.assertEqual(environment['FOR_COARRAY_NUM_IMAGES'], '2')
+                self.assertEqual(environment['I_MPI_FABRICS'], 'shm')
+                self.assertEqual(environment['I_MPI_PIN'], '0')
+                self.assertEqual(environment['I_MPI_HYDRA_IFACE'], 'lo')
+                self.assertLessEqual(int(environment['I_MPI_SHM_HEAP_VSIZE']), 8)
+                for direction in ('FWD', 'BWD', 'EXT'):
+                    self.assertLessEqual(int(environment[f'I_MPI_SHM_CELL_{direction}_SIZE']), 65536)
         self.assertIsNone(coarray_environment('ifx', None))
         self.assertEqual(coarray_command('ifx', '/program', None), ['/program'])
 

@@ -61,4 +61,8 @@ def probe(compiler, *, diagnostics=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', choices=('gfortran', 'gfortran17', 'ifx', 'flang', 'lfortran'), required=True)
-    print(json.dumps(probe(parser.parse_args().compiler, diagnostics=True)))
+    args = parser.parse_args()
+    # Match actual workers, including privilege dropping and Unix resource limits.
+    from xsandbox_worker import apply_sandbox_limits
+    apply_sandbox_limits({'compiler': args.compiler, 'compiler_options': {'images': 4}})
+    print(json.dumps(probe(args.compiler, diagnostics=True)))

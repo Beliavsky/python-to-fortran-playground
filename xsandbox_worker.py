@@ -8,7 +8,16 @@ import threading
 from xrun import execute
 
 
-def main():
+def file_size_limit(payload):
+    """Coarray shared-memory backing files need the configured 64 MiB segment."""
+    options = payload.get('compiler_options') or {}
+    images = options.get('images') if isinstance(options, dict) else None
+    coarrays = (payload.get('compiler', 'gfortran') in ('gfortran', 'gfortran17', 'ifx', 'flang', 'lfortran')
+                and type(images) is int and images in (1, 2, 4))
+    return (64 if coarrays else 16) * 1024 * 1024
+
+
+def apply_sandbox_limits(payload):
     # Modal ignores Dockerfile USER. Drop privileges explicitly and fail closed.
     if os.geteuid() == 0:
         os.setgroups([])
@@ -20,11 +29,16 @@ def main():
     # memory, network, filesystem isolation, and wall-clock limits.
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (16 * 1024 * 1024,) * 2)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (file_size_limit(payload),) * 2)
     resource.setrlimit(resource.RLIMIT_NPROC, (128, 128))
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
+
+
+def main():
+    # Parse only bounded JSON before selecting limits; no submitted code runs here.
     # Public requests remain small; the API may attach a private retained binary.
     payload = json.loads(sys.stdin.readline(8_000_001))
+    apply_sandbox_limits(payload)
     try:
         result = execute(Path('/opt/p2f/runtime'), payload['source'], payload['mode'],
                          threading.Event(), timeout=30, automatic=payload.get('automatic', False),

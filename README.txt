@@ -338,11 +338,14 @@ the GitHub Pages origin and local preview origins. Each browser receives its
 own temporary session token; jobs and cancellation are restricted to their
 owner. CORS is a browser policy, not protection from automated clients.
 
-Each execution runs as an unprivileged user in a new gVisor sandbox, with
+Each execution runs as an unprivileged user in a new isolated sandbox, with
 networking blocked, no secrets or shared volumes, at most one physical CPU
 core and 1 GiB memory, a 250-second sandbox lifetime, 30 seconds per program,
 and the existing source/output limits. Unix limits cap individual files at
-16 MiB, processes at 128, and open files at 128. The sandbox's root filesystem
+16 MiB (64 MiB for coarray jobs), processes at 128, and open files at 128. Intel
+two/four-image coarray jobs use Modal's VM runtime for its real Linux CPU
+topology; other jobs use gVisor. Both have the same network/resource controls.
+The sandbox's root filesystem
 quota is supplied by Modal; the file-size limit is not a total-disk quota.
 The image includes gfortran, NumPy, SciPy, pandas, and the verified pinned
 transpiler/helpers. Visitors do not need these installed on their computers.
@@ -771,7 +774,45 @@ Intel uses -coarray=single for one image, or -coarray=shared together with
 -coarray-num-images=N for two or four. The compiler package already depends on
 Intel MPI. The trusted p2f-ifx-run wrapper initializes its environment before
 execution, including retained runs. Runtime settings specify FOR_COARRAY_NUM_IMAGES,
-I_MPI_FABRICS=shm, I_MPI_PIN=0 and I_MPI_WAIT_MODE=1. No network access is enabled.
+I_MPI_FABRICS=shm, I_MPI_PIN=0 and I_MPI_WAIT_MODE=1. Intel multi-image jobs use
+a Modal VM sandbox: gVisor's incomplete CPU topology triggers an assertion in
+Intel MPI 2021.17. Hydra is restricted to the local loopback interface. MPI
+transport buffers use an 8 MiB heap per rank and eight 64 KiB forward/backward
+cells (eight extension cells total), fitting the 64 MiB backing-file cap with
+four ranks. These settings size MPI transport buffers, not user coarray data.
+No external network access is enabled. The same routing applies to Run Again.
+
+VM validation passed synchronized exchange at 1/2/4 images, both standalone
+playground coarray examples and retained reruns at 2/4 images, and coindexed
+12 MB array transfers at 2/4 images. The Intel tutorial Monte Carlo program
+also passed its original 600 million trials at two images (about 16 seconds).
+See https://modal.com/docs/guide/sandboxes#runtimes for the isolated VM runtime.
+
+EXTERNAL SINGLE-SOURCE LOADING
+
+The standalone Fortran frontend can load a public raw-source HTTPS URL using
+POST /api/external-source with its ordinary session token and {"url":"..."}.
+Sessions advertise features.external_source. The API returns normalized UTF-8
+source, final URL, a display filename and SHA-256 of the normalized text. It
+does not compile/execute downloaded data or store it in persistent state.
+
+xexternal_source.py validates all redirects, requires publicly routable DNS
+addresses, pins HTTPS connections to validated IPs, verifies TLS against the
+original hostname and never forwards credentials/cookies. Only port 443 is
+accepted. Downloads are capped at 100 KB and 15 seconds of network activity
+(the request stops waiting after 20 seconds), with five total request hops.
+HTML, compressed, empty, non-UTF-8 and NUL-containing responses are rejected.
+Per-address load rates persist independently of execution quota; no more than
+two fetch tasks are active, and a request timeout does not release a slot until
+the fetch task actually completes. No owner secret is sent to a source server.
+
+The browser submits external code before editor code as one combined source,
+within the normal 100 KB execution limit. Ordinary job validation, compiler
+options, artifact ownership and network-blocked execution still apply. Source
+snapshots and provenance are included in browser downloads/share links. This
+feature supports one source file, not repositories, fpm dependency resolution,
+external binary libraries or automatic include downloads. Redeploy the backend
+and publish the standalone frontend to enable the controls.
 
 Flang 23 uses -fcoarray and LFortran 0.66 uses --coarray=true. Each has a separate
 Caffeine runtime built using its own compiler, linked after user code/objects,
@@ -793,7 +834,8 @@ never downloaded or rebuilt during user jobs. Installation diagnostics are
 retained in each runtime prefix's install.log.
 
 Deployment runs xverify_coarrays.py in each available GNU, Intel, Flang and LFortran image inside a
-network-blocked gVisor sandbox, with the same CPU and memory settings as jobs.
+network-blocked sandbox, with the same CPU, memory, privilege and Unix limits
+as jobs. Intel probes use the VM runtime; other compiler probes use gVisor.
 The probe compiles/runs a synchronized coindexed exchange with counts 1, 2, 4.
 Only successful counts are exported through P2F_COMPILER_COARRAYS and session
 coarray_images catalogs. Compiler flags in returned metadata must exactly match
@@ -845,3 +887,9 @@ operations. Input is not sent to compilers, formatters, or linters. This is batc
 input, not an interactive terminal. Coarray programs should read on image 1
 and distribute values to other images. Redeploy xdeploy_service.py to enable
 stdin on the hosted API; no extra sandbox launches are needed per job.
+
+Worker file-size limits are 16 MiB for ordinary jobs and 64 MiB for explicitly
+enabled coarray jobs, allowing the configured 64 MiB shared-memory backing
+segment. Coarray deployment probes use the same privilege drop and Unix limits
+as real jobs. A process killed by a Unix signal reports its signal name; SIGXFSZ
+identifies the file-size limit, which also applies to shared-memory backing files.

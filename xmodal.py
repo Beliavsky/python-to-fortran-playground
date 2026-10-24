@@ -1,6 +1,6 @@
 """Public execution API; build and deploy using python xdeploy_service.py.
 
-User code runs only in fresh, network-blocked gVisor sandboxes. The API
+User code runs only in fresh, network-blocked gVisor or VM sandboxes. The API
 container owns the Modal client and persistent limits; neither is in a job.
 """
 import json
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 import modal
+from compiler_options import coarray_sandbox_runtime
 
 ROOT = Path(__file__).resolve().parent
 app = modal.App('p2f-playground-execution')
@@ -159,6 +160,7 @@ api_image = (
           'P2F_COMPILER_STANDARDS': os.environ.get('P2F_COMPILER_STANDARDS', '{}'),
           'P2F_COMPILER_COARRAYS': os.environ.get('P2F_COMPILER_COARRAYS', '{}')})
     .add_local_file(ROOT / 'xpublic_api.py', '/root/xpublic_api.py', copy=True)
+    .add_local_file(ROOT / 'xexternal_source.py', '/root/xexternal_source.py', copy=True)
     .add_local_file(ROOT / 'compiler_options.py', '/root/compiler_options.py', copy=True)
     .add_local_file(ROOT / 'translation_options.py', '/root/translation_options.py', copy=True)
     .add_local_file(ROOT / 'site/translation_settings.py', '/root/site/translation_settings.py', copy=True)
@@ -186,6 +188,13 @@ def job_image_name(payload):
     return RUNTIME_IMAGE_NAME
 
 
+def job_sandbox_runtime(payload):
+    if payload.get('mode') in {'format', 'check'}:
+        return 'gvisor'
+    return coarray_sandbox_runtime(payload.get('compiler', 'gfortran'),
+                                  (payload.get('compiler_options') or {}).get('images'))
+
+
 class Sandboxes:
     async def start(self, payload):
         image_name = job_image_name(payload)
@@ -193,7 +202,7 @@ class Sandboxes:
             'python', '/opt/p2f/xsandbox_worker.py',
             # Runtime containers cannot upload files from the developer's
             # checkout. Resolve the image built and published before deploy.
-            app=app, image=modal.Image.from_name(image_name), runtime='gvisor',
+            app=app, image=modal.Image.from_name(image_name), runtime=job_sandbox_runtime(payload),
             workdir='/work', block_network=True,
             cpu=(0.5, 1.0), memory=(512, 1024), timeout=250,
             secrets=[], volumes={}, include_oidc_identity_token=False,

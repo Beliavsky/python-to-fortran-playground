@@ -263,6 +263,17 @@ def run_command(command, cwd, cancel, timeout, *, env=None, stdin=''):
         reader.join(timeout=2)
     if not reason and overflow.is_set():
         reason = "Output limit exceeded."
+    if not reason and process.returncode:
+        if os.name != 'nt' and process.returncode < 0:
+            try:
+                name = signal.Signals(-process.returncode).name
+            except ValueError:
+                name = str(-process.returncode)
+            reason = f'Process terminated by signal {name}.'
+            if name == 'SIGXFSZ':
+                reason += ' File-size limit exceeded (including shared-memory backing files).'
+        elif not buffers[0] and not buffers[1]:
+            reason = f'Process exited with code {process.returncode}.'
     result.update(ok=process.returncode == 0 and not reason, exit_code=process.returncode,
                   stdout=buffers[0].decode("utf-8", errors="replace"),
                   stderr=buffers[1].decode("utf-8", errors="replace") + ("\n" + reason if reason else ""),

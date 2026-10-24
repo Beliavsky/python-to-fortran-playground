@@ -130,13 +130,26 @@ def coarray_link_flags(compiler, images=None):
     return flags
 
 
+def coarray_sandbox_runtime(compiler, images):
+    # Intel MPI needs CPU topology/syscalls absent from gVisor's virtual kernel.
+    return 'vm' if compiler == 'ifx' and type(images) is int and images in (2, 4) else 'gvisor'
+
+
 def coarray_environment(compiler, images):
     """Trusted runtime settings shared by deployment probes and user execution."""
     if images is None:
         return None
     if compiler == 'ifx':
         return {'FOR_COARRAY_NUM_IMAGES': str(images), 'I_MPI_FABRICS': 'shm',
-                'I_MPI_PIN': '0', 'I_MPI_WAIT_MODE': '1'}
+                'I_MPI_PIN': '0', 'I_MPI_WAIT_MODE': '1', 'I_MPI_HYDRA_IFACE': 'lo',
+                # Keep MPI's backing file below the worker's 64 MiB file cap,
+                # including four ranks. These are transport buffers, not a
+                # limit on the program's total coarray allocation.
+                'I_MPI_SHM_HEAP_VSIZE': '8',
+                'I_MPI_SHM_CELL_FWD_NUM': '8', 'I_MPI_SHM_CELL_BWD_NUM': '8',
+                'I_MPI_SHM_CELL_EXT_NUM_TOTAL': '8',
+                'I_MPI_SHM_CELL_FWD_SIZE': '65536', 'I_MPI_SHM_CELL_BWD_SIZE': '65536',
+                'I_MPI_SHM_CELL_EXT_SIZE': '65536'}
     if compiler in ('flang', 'lfortran'):
         return {'GASNET_PSHM_NODES': str(images), 'GASNET_MAX_SEGSIZE': '64M',
                 'GASNET_EXITTIMEOUT': '2', 'GASNET_BACKTRACE': '0'}

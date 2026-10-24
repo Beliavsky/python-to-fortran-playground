@@ -1,11 +1,12 @@
 """Verify cache boundaries without building images or using Modal credentials."""
 import hashlib
+import asyncio
 from pathlib import Path
 import runpy
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock, AsyncMock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +45,29 @@ def definitions(changed=None):
 
 
 class LayerTests(unittest.TestCase):
+    def test_only_intel_multi_image_jobs_use_vm_and_keep_isolation(self):
+        images = definitions()
+        sandbox = Mock(object_id='test-sandbox')
+        sandbox.stdin.drain.aio = AsyncMock()
+        create = AsyncMock(return_value=sandbox)
+        images['modal'].Sandbox = SimpleNamespace(create=SimpleNamespace(aio=create))
+        images['modal'].Image.from_name = lambda name: name
+        provider = images['Sandboxes']()
+        cases = [('ifx', 2, 'vm'), ('ifx', 4, 'vm'), ('ifx', 1, 'gvisor'),
+                 ('ifx', None, 'gvisor'), ('gfortran', 2, 'gvisor'), ('lfortran', 4, 'gvisor')]
+        for compiler, count, expected in cases:
+            for mode in ('fortran-edit', 'fortran-compile', 'fortran-run'):
+                payload = {'compiler': compiler, 'mode': mode, 'compiler_options': {'images': count}}
+                self.assertEqual(asyncio.run(provider.start(payload)), 'test-sandbox')
+                kwargs = create.call_args.kwargs
+                self.assertEqual(kwargs['runtime'], expected)
+                self.assertTrue(kwargs['block_network'])
+                self.assertEqual(kwargs['secrets'], [])
+                self.assertEqual(kwargs['volumes'], {})
+                self.assertFalse(kwargs['include_oidc_identity_token'])
+        self.assertEqual(images['job_sandbox_runtime']({'mode': 'check', 'compiler': 'ifx',
+                                                       'compiler_options': {'images': 2}}), 'gvisor')
+
     def test_caffeine_is_cached_per_compiler_after_helper_builds(self):
         original, changed = definitions(), definitions('xinstall_caffeine.py')
         for name in ('flang_job_image', 'lfortran_job_image'):

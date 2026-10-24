@@ -35,9 +35,9 @@ def read_image_metadata(build_app, image_name, compiler):
 
 def read_coarray_support(build_app, image_name, compiler):
     """Use the real job runtime/isolation/resource settings, never a build-container guess."""
-    from compiler_options import OPTIONS
+    from compiler_options import OPTIONS, coarray_sandbox_runtime
     sandbox = modal.Sandbox.create('python', '/opt/p2f/xverify_coarrays.py', '--compiler', compiler,
-        app=build_app, image=modal.Image.from_name(image_name), runtime='gvisor',
+        app=build_app, image=modal.Image.from_name(image_name), runtime=coarray_sandbox_runtime(compiler, 4),
         workdir='/work', timeout=60, cpu=(0.5, 1.0), memory=(512, 1024),
         block_network=True, secrets=[], volumes={}, include_oidc_identity_token=False)
     try:
