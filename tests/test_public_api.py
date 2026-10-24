@@ -318,6 +318,18 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(payload['mode'], 'format')
         self.assertNotIn('retain_executable', payload)
 
+    def test_format_indent_is_advertised_validated_and_forwarded(self):
+        self.assertEqual(self.client.get('/api/session', headers=self.origin).json()['features']['format_indents'], [2, 3, 4])
+        for width in [0, 1, 5, True, '3', None]:
+            response = self.client.post('/api/jobs', json={'source': 'program p\nend', 'mode': 'format', 'format_indent': width}, headers=self.headers)
+            self.assertEqual(response.status_code, 400)
+        response = self.client.post('/api/jobs', json={'source': 'program p\nend', 'mode': 'check', 'format_indent': 3}, headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.runner.jobs)
+        response = self.client.post('/api/jobs', json={'source': 'program p\nend', 'mode': 'format', 'format_indent': 2}, headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.runner.jobs['0']['payload']['format_indent'], 2)
+
     def retained_build(self):
         payload = {'source': '', 'mode': 'fortran-compile', 'fortran_source': 'program main\nend',
                    'retain_executable': True, 'compiler_options': {'preset': 'debug'}}

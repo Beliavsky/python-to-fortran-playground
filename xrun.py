@@ -307,10 +307,12 @@ def fortitude_command():
 
 def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30, automatic=False,
             compiler_name="gfortran", fortran_source=None, compiler_options=None, translation_options=None,
-            retain_executable=False, executable=None, stdin=''):
+            retain_executable=False, executable=None, stdin='', format_indent=3):
     started = time.perf_counter()
     result = {"ok": False, "fortran": "", "mode": mode, "seconds": 0.0,
               "compiler": compiler_name}
+    if type(format_indent) is not int or format_indent not in (2, 3, 4) or (mode != 'format' and format_indent != 3):
+        return {**result, 'error': 'Format indentation must be 2, 3, or 4 spaces, for formatting only.'}
     try:
         if (not isinstance(stdin, str) or len(stdin.encode('utf-8')) > MAX_STDIN
                 or (stdin and mode in {'translate', 'annotate', 'format', 'check', 'fortran-compile'})):
@@ -324,7 +326,7 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         with tempfile.TemporaryDirectory(prefix='p2f_format_') as directory:
             job = Path(directory)
             (job / 'input.f90').write_text(source.replace('\r\n', '\n').replace('\r', '\n'), encoding='utf-8')
-            command = ([sys.executable, str(ROOT / 'xformat_fortran.py')] if mode == 'format' else
+            command = ([sys.executable, str(ROOT / 'xformat_fortran.py'), '--indent', str(format_indent)] if mode == 'format' else
                        [fortitude_command(), '--isolated', 'check', '--no-fix', '--no-preview',
                         '--output-format', 'concise', '--progress-bar', 'off', 'input.f90'])
             stage = run_command(command,
@@ -513,7 +515,8 @@ class ExecutionServer(ThreadingHTTPServer):
                                  compiler_name=payload.get("compiler", "gfortran"),
                                  fortran_source=payload.get('fortran_source'),
                                  compiler_options=payload.get('compiler_options'),
-                                 translation_options=payload.get('translation_options'), stdin=payload.get('stdin', ''))
+                                 translation_options=payload.get('translation_options'), stdin=payload.get('stdin', ''),
+                                 format_indent=payload.get('format_indent', 3))
             except Exception as error:
                 result = {"ok": False, "error": str(error)}
             with self.lock:
@@ -561,6 +564,7 @@ class Handler(SimpleHTTPRequestHandler):
                                  compiler_command(name, self.server.compiler)) for name in compilers},
                              'source_tools': True, 'features': {'stdin': True, 'max_stdin_bytes': MAX_STDIN,
                                                                'format': importlib.util.find_spec('fprettify') is not None,
+                                                               'format_indents': [2, 3, 4],
                                                                'check': Path(fortitude_command()).is_file() or shutil.which(fortitude_command()) is not None}})
         elif self.path.startswith("/api/jobs/"):
             if not self.allowed(token=True):
@@ -605,6 +609,7 @@ class Handler(SimpleHTTPRequestHandler):
                     or not valid_source or (not source.strip() and mode not in {'fortran-edit', 'fortran-compile'})
                     or (mode in EDIT_MODES and (not valid_ft or payload.get('automatic', False)))
                     or (mode in {'format', 'check'} and payload.get('automatic', False))
+                    or ('format_indent' in payload and (mode != 'format' or type(payload['format_indent']) is not int or payload['format_indent'] not in (2, 3, 4)))
                     or not isinstance(choice, str) or choice not in COMPILERS
                     or not isinstance(payload.get("automatic", False), bool)
                     or not valid_stdin or (stdin and mode in {'translate', 'annotate', 'format', 'check', 'fortran-compile'})):

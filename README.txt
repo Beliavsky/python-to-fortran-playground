@@ -893,3 +893,12 @@ enabled coarray jobs, allowing the configured 64 MiB shared-memory backing
 segment. Coarray deployment probes use the same privilege drop and Unix limits
 as real jobs. A process killed by a Unix signal reports its signal name; SIGXFSZ
 identifies the file-size limit, which also applies to shared-memory backing files.
+
+FORMAT INDENTATION
+
+Format jobs optionally accept format_indent: 2, 3, or 4 (integer spaces),
+defaulting to 3 for existing clients. The session advertises format_indents.
+The API rejects other widths and use on non-format jobs. The private worker
+passes the validated width to xformat_fortran.py --indent; source annotations
+cannot override formatter settings. Redeploy with xdeploy_service.py to publish
+the API and updated source-tool worker together.

@@ -101,7 +101,7 @@ class PublicService:
                     'compilers': list(self.compilers), 'hosted': True, 'compiler_options': self.compiler_catalog(), 'source_tools': True,
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
                     'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True,
-                                 'stdin': True, 'max_stdin_bytes': MAX_STDIN,
+                                 'stdin': True, 'max_stdin_bytes': MAX_STDIN, 'format_indents': [2, 3, 4],
                                  'external_source': True,
                                  'owner_access': bool(self.owner_key), 'artifact_ttl': ARTIFACT_TTL}}
 
@@ -335,6 +335,8 @@ def create_api(service):
             source, mode = payload.get('source', ''), payload.get('mode')
             compiler = payload.get('compiler', 'gfortran')
             ft_source = payload.get('fortran_source')
+            if 'format_indent' in payload and (mode != 'format' or type(payload['format_indent']) is not int or payload['format_indent'] not in (2, 3, 4)):
+                raise HTTPException(400, 'Format indentation must be 2, 3, or 4 spaces, for formatting only.')
             stdin = payload.get('stdin', '')
             if (not isinstance(stdin, str) or len(stdin.encode('utf-8')) > MAX_STDIN
                     or (stdin and mode in ('translate', 'annotate', 'format', 'check', 'fortran-compile'))):
@@ -361,7 +363,7 @@ def create_api(service):
             raise HTTPException(400, str(error))
         return await service.submit(token, {key: payload[key] for key in
             ('source', 'mode', 'automatic', 'compiler', 'fortran_source', 'compiler_options', 'translation_options',
-             'retain_executable', 'artifact_id', 'stdin') if key in payload
+             'retain_executable', 'artifact_id', 'stdin', 'format_indent') if key in payload
             and (key != 'fortran_source' or mode in EDIT_MODES)},
             owner_key=request.headers.get('x-p2f-owner-key', ''))
 

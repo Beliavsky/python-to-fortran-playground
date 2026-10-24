@@ -9,6 +9,23 @@ from xrun import execute, MAX_SOURCE
 
 
 class FormattingTests(unittest.TestCase):
+    def test_indent_width_is_validated_before_launch_and_passed_to_formatter(self):
+        for width in [0, 1, 5, True, '3', None]:
+            with patch('xrun.run_command', side_effect=AssertionError('Worker launched')):
+                self.assertFalse(execute(Path('.'), 'program p\nend', 'format', threading.Event(), format_indent=width)['ok'])
+        with patch('xrun.run_command', return_value={'ok': True, 'stdout': 'program p\nend\n', 'stderr': ''}) as command:
+            execute(Path('.'), 'program p\nend', 'format', threading.Event(), format_indent=4)
+            self.assertEqual(command.call_args.args[0][-2:], ['--indent', '4'])
+
+    @unittest.skipUnless(importlib.util.find_spec('fprettify'), 'Install fprettify==0.3.7')
+    def test_real_formatter_uses_selected_width(self):
+        for width in [2, 3, 4]:
+            result = execute(Path('.'), 'program p\ninteger::i\ndo i=1,2\nprint *, i\nend do\nend\n',
+                             'format', threading.Event(), format_indent=width)
+            self.assertTrue(result['ok'], result)
+            self.assertIn('\n' + ' ' * width + 'integer', result['formatted_source'])
+            self.assertIn('\n' + ' ' * (2 * width) + 'print', result['formatted_source'])
+
     def test_worker_failure_preserves_source(self):
         with patch('xrun.run_command', return_value={'ok': False, 'stdout': 'partial', 'stderr': 'Failed'}), patch('xrun.compiler_command', side_effect=AssertionError('Compiler used')):
             result = execute(Path('.'), 'program main\nend', 'format', threading.Event())
