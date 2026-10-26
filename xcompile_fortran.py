@@ -41,6 +41,9 @@ def main():
         # user-written USE ::, continuations and semicolon-separated statements.
         explicit = []
         defined = xp2f._modules_defined_in_source(source)
+        if 'pyplot_module' in [name.lower() for name in helper_modules(source)] and 'pyplot_module' not in defined:
+            from fortran_plot import install_module
+            explicit.append(str(install_module(Path.cwd() / 'plotting')))
         for module in helper_modules(source):
             module = module.lower()
             if module in defined:
@@ -52,6 +55,9 @@ def main():
             if candidate.is_file() and str(candidate) not in explicit:
                 explicit.append(str(candidate))
         helper_files, _, missing = xp2f.resolve_helper_files_for_build('input_p.f90', explicit)
+        # These modules come from the compiler, not downloadable helper sources.
+        intrinsic_modules = {'iso_fortran_env', 'iso_c_binding', 'ieee_arithmetic', 'ieee_exceptions', 'ieee_features'}
+        missing = [item for item in missing if item[0].lower() not in intrinsic_modules]
         if missing:
             print('Build: FAIL (missing helper modules):', missing, flush=True)
             return 1

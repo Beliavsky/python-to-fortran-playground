@@ -73,8 +73,12 @@ class CoarrayTests(unittest.TestCase):
             runtime = Path(directory)
             xrun.execute(runtime, '', 'fortran-edit', threading.Event(), fortran_source='print *, 42\nend\n',
                          compiler_options={'images': 2})
-            self.assertEqual(run.call_args.kwargs['env'], {'GFORTRAN_NUM_IMAGES': '2',
+            env = run.call_args.kwargs['env']
+            plotting_keys = {'MPLBACKEND', 'MPLCONFIGDIR', 'XDG_CACHE_HOME', 'PATH'}
+            self.assertEqual({key: value for key, value in env.items() if key not in plotting_keys}, {'GFORTRAN_NUM_IMAGES': '2',
                 'GFORTRAN_SHARED_MEMORY_SIZE': '64M', 'GFORTRAN_IMAGE_RESTARTS_LIMIT': '8'})
+            self.assertEqual(env['MPLBACKEND'], 'Agg')
+            self.assertTrue(Path(env['MPLCONFIGDIR']).is_absolute())
             self.assertNotIn('env', run.call_args_list[0].kwargs)  # Compiler environment is unchanged.
             xrun.execute(runtime, '', 'fortran-run', threading.Event(), compiler_options={'images': 4},
                          executable=base64.b64encode(b'fake-binary').decode())
@@ -155,7 +159,9 @@ class CoarrayTests(unittest.TestCase):
                 xrun.execute(Path(directory), '', 'fortran-run', threading.Event(), compiler_name=compiler,
                              compiler_options={'images': 2}, executable=base64.b64encode(b'fake').decode())
                 self.assertEqual(run.call_args.kwargs['env']['GASNET_PSHM_NODES'], '2')
-                self.assertEqual(run.call_args.kwargs['env'], coarray_environment(compiler, 2))
+                plotting_keys = {'MPLBACKEND', 'MPLCONFIGDIR', 'XDG_CACHE_HOME', 'PATH'}
+                self.assertEqual({key: value for key, value in run.call_args.kwargs['env'].items() if key not in plotting_keys},
+                                 coarray_environment(compiler, 2))
 
     @unittest.skipUnless(shutil.which('gfortran'), 'GNU compiler required')
     def test_local_probe_verifies_at_least_single_image_exchange(self):

@@ -24,6 +24,7 @@ import time
 import zipfile
 from compiler_options import OPTIONS, user_flags, coarray_environment, coarray_command
 from translation_options import validate_options, cli_options, strip_fortran_comments
+from fortran_plot import collect_plots, plotting_environment, uses_pyplot
 
 ROOT = Path(__file__).resolve().parent
 MAX_SOURCE = 100_000
@@ -357,11 +358,16 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
                       compiler_version=detect_compiler_version('ofort'))
         with tempfile.TemporaryDirectory(prefix='p2f_ofort_') as directory:
             job = Path(directory)
+            if uses_pyplot(fortran_source):
+                from fortran_plot import module_source
+                fortran_source = module_source() + '\n' + fortran_source
             (job / 'input.f90').write_text(fortran_source, encoding='utf-8')
             if mode == 'fortran-compile':
                 result['build'] = run_command(shlex.split(DEFAULT_OFORT) + ['--check', 'input.f90'], job, cancel, timeout)
             else:
-                result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout, stdin=stdin)
+                result['execution'] = run_command(shlex.split(DEFAULT_OFORT) + ['input.f90'], job, cancel, timeout,
+                                                  stdin=stdin, env=plotting_environment({}, directory=job))
+                result.update(collect_plots(job))
         result.update(ok=all(result[key]['ok'] for key in ('build', 'execution') if key in result)
                       and not cancel.is_set(), seconds=time.perf_counter() - started)
         return result
@@ -395,7 +401,9 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
             exe = Path(directory) / 'input_p.exe'
             exe.write_bytes(binary)
             exe.chmod(0o700)
-            result['execution'] = run_command(coarray_command(compiler_name, exe, images), Path(directory), cancel, timeout, env=execution_env, stdin=stdin)
+            result['execution'] = run_command(coarray_command(compiler_name, exe, images), Path(directory), cancel, timeout,
+                                              env=plotting_environment(execution_env or {}, directory=directory), stdin=stdin)
+            result.update(collect_plots(Path(directory)))
         result.update(ok=result['execution']['ok'], reused_executable=True,
                       translation_options=None, seconds=time.perf_counter() - started)
         return result
@@ -473,7 +481,9 @@ def execute(runtime, source, mode, cancel, compiler=DEFAULT_COMPILER, timeout=30
         if mode in COMPILE_MODES and mode != 'fortran-compile' and result["build"]["ok"]:
             # The pinned upstream CLI uses .exe on every platform.
             exe = ft / "input_p.exe"
-            result["execution"] = run_command(coarray_command(compiler_name, exe, images), ft, cancel, timeout, env=execution_env, stdin=stdin)
+            result["execution"] = run_command(coarray_command(compiler_name, exe, images), ft, cancel, timeout,
+                                              env=plotting_environment(execution_env or {}, directory=ft), stdin=stdin)
+            result.update(collect_plots(ft))
         stages = [result[key]["ok"] for key in ("build", "python", "execution") if key in result]
         result["ok"] = bool(stages) and all(stages) and not cancel.is_set()
         if mode in {'compare', 'compare-edit'} and result["ok"]:

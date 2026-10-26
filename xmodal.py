@@ -21,7 +21,8 @@ def runtime_image_name():
         return os.environ['P2F_RUNTIME_IMAGE_NAME']
     digest = hashlib.sha256()
     # Changing an execution dependency selects a new immutable named image.
-    for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py',
+    for filename in ('xmodal.py', 'xrun.py', 'compiler_options.py', 'translation_options.py', 'fortran_plot.py',
+                     'vendor/pyplot-fortran/src/pyplot_module.F90', 'vendor/pyplot-fortran/upstream.json',
                      'site/annotations.py', 'site/translation_settings.py', 'xcompile_fortran.py', 'xformat_fortran.py', 'xbuild_helpers.py', 'xsandbox_worker.py', 'xinstall_intel.sh',
                      'xverify_intel.py', 'xprecompile.py', 'xinstall_flang.sh',
                      'xverify_flang.py', 'xinstall_ofort.sh', 'xverify_ofort.py', 'xinstall_gnu17.sh', 'xverify_gnu.py', 'xverify_coarrays.py', 'xinstall_caffeine.py', 'upstream.json',
@@ -91,7 +92,9 @@ def helper_image(base, name, command):
 
 
 def application_image(base, source_tools=False):
-    image = base
+    image = ((base if source_tools else base.pip_install('matplotlib==3.10.8'))
+             .add_local_file(ROOT / 'fortran_plot.py', '/opt/p2f/fortran_plot.py', copy=True)
+             .add_local_dir(ROOT / 'vendor/pyplot-fortran', '/opt/p2f/vendor/pyplot-fortran', copy=True))
     for filename in ('xrun.py', 'compiler_options.py', 'translation_options.py',
                      'site/translation_settings.py', 'site/annotations.py', 'xcompile_fortran.py',
                      'xprecompile.py', 'xsandbox_worker.py', 'xverify_intel.py', 'xverify_flang.py', 'xverify_gnu.py', 'xverify_coarrays.py'):

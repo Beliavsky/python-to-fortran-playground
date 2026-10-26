@@ -902,3 +902,23 @@ The API rejects other widths and use on non-format jobs. The private worker
 passes the validated width to xformat_fortran.py --indent; source annotations
 cannot override formatter settings. Redeploy with xdeploy_service.py to publish
 the API and updated source-tool worker together.
+
+PLOTTING
+
+Standalone Fortran can USE pyplot_module from the pinned pyplot-fortran source
+in vendor/pyplot-fortran. Runtime images include Matplotlib 3.10.8; the worker
+sets MPLBACKEND=Agg and returns regular PNG files from the run directory as
+plots: [{name, mime: "image/png", data: BASE64}]. Collection is limited to four
+PNGs and 1 MiB combined image data, with bounded dimensions and validated PNG
+structure. SVG, HTML, scripts, symlinks, and nested files are not exported.
+Run Again collects images from its fresh execution directory too. Rendering
+and Python child processes stay within the existing sandbox and job timeout.
+Format/Check images do not install Matplotlib. The session advertises
+features.plotting after redeployment. The Fortran playground renders returned
+images; existing consumers can ignore the additional result fields.
+
+GNU 16/17, ifx, Flang and LFortran passed the hosted plotting example. ofort
+cannot currently execute the upstream module's derived-type string substring
+operation; its failure is reported without switching compilers. Details and
+local-use instructions:
+https://github.com/Beliavsky/fortran-playground/blob/main/docs/plotting.md

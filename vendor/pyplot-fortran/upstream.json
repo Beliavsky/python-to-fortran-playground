@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/jacobwilliams/pyplot-fortran",
+  "revision": "217d0c97a12812ff5c5aca00e5439237e866bc91",
+  "sha256": {
+    "src/pyplot_module.F90": "f1d3de3e2aca70e23c8463467f045d9659ea168135a61317ee6cfb6f2da69ab1",
+    "LICENSE": "784d23d2b30e28074da94c749eb1f9994580ab9e3db3ddcebe93df9ef8f3fc71"
+  }
+}

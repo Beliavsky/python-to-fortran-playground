@@ -102,7 +102,7 @@ class PublicService:
                     'compiler_versions': {name: self.compiler_versions.get(name) for name in self.compilers},
                     'features': {'compile_only': True, 'run_again': True, 'format': True, 'check': True,
                                  'stdin': True, 'max_stdin_bytes': MAX_STDIN, 'format_indents': [2, 3, 4],
-                                 'external_source': True,
+                                 'external_source': True, 'plotting': True,
                                  'owner_access': bool(self.owner_key), 'artifact_ttl': ARTIFACT_TTL}}
 
     async def external_source(self, token, url):
