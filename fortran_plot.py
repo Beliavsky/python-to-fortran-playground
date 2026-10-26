@@ -40,7 +40,11 @@ def module_source():
             active = True
         elif active:
             output.append(line)
-    return '\n'.join(output) + '\n'
+    source = '\n'.join(output) + '\n'
+    # Upstream's figure-size statement exceeds the traditional 132-column limit.
+    # Continue the expression outside its string literals; keep the pinned file intact.
+    return source.replace("python_fig_func//'(figsize=('",
+                          "python_fig_func// &\n            '(figsize=('")
 
 
 def install_module(directory):
