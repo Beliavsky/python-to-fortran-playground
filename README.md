@@ -3,6 +3,13 @@
 Translate Python to Fortran in your browser, inspect the generated source,
 and run Python and Fortran using the execution playground.
 
+This playground uses the
+[python-to-fortran transpiler](https://github.com/beliavsky/python-to-fortran)
+to translate Python into Fortran. You can try it here in your browser, or
+install and run the transpiler locally from the command line. See the
+transpiler repository for installation instructions, command-line usage, and
+supported Python features.
+
 - [Translation playground](https://beliavsky.github.io/python-to-fortran-playground/)
 - [Python and Fortran execution playground](https://beliavsky.github.io/python-to-fortran-playground/run/)
 - [Fortran-only playground](https://beliavsky.github.io/python-to-fortran-playground/run/?mode=fortran)
