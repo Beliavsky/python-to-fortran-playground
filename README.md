@@ -14,8 +14,9 @@ configured hosted service, or a local service when previewed on localhost.
 ## Contents
 
 - [Built-in examples](#built-in-examples)
-- [Local execution setup](#execution-preview-on-windows)
-- [Local translation setup](#translation-only-preview-on-windows)
+- [Local setup prerequisites](#local-setup-prerequisites)
+- [Local execution setup](#local-execution-setup)
+- [Local translation setup](#local-translation-setup)
 - [Updating the transpiler](#on-demand-upstream-updates)
 - [Checks](#checks)
 - [Publishing with GitHub Pages](#publishing-with-github-pages)
@@ -45,27 +46,86 @@ test. `tests/test_examples.py` compiles and runs all of them with GNU Fortran,
 compares deterministic output with Python, and checks that both random programs
 run successfully. Helpers are precompiled once for this test group. Run it with:
 
-```powershell
+```sh
 python -m unittest discover -s tests -p test_examples.py
 ```
 
 Changing `upstream.json` requires revalidating this catalog; the examples are
 not a claim that every upstream example or every optional compiler is supported.
 
-## Execution preview on Windows
+## Local setup prerequisites
+
+For Windows, macOS, or Linux, install:
+
+- Python with pip. The deployment workflow uses Python 3.12.
+- Node.js with npm. The deployment workflow uses Node.js 22.
+- Git if cloning the repository; alternatively, download and extract its ZIP.
+- GNU Fortran (`gfortran`) on `PATH` for local Fortran execution. Translation
+  and Python-only execution do not require a Fortran compiler.
+
+Get the source and enter the project directory:
+
+```sh
+git clone https://github.com/beliavsky/python-to-fortran-playground.git
+cd python-to-fortran-playground
+```
+
+If you downloaded a ZIP, enter its extracted directory instead. Run the
+remaining commands from that directory. Commands below use `python`; replace
+it with `python3` if that is your system's Python 3 command.
+
+An optional virtual environment keeps installed Python packages separate:
+
+```sh
+python -m venv .venv
+```
+
+Activate it in Windows PowerShell:
 
 ```powershell
-cd C:\python\python-to-fortran-playground
+.\.venv\Scripts\Activate.ps1
+```
+
+Or in a macOS/Linux shell (bash or zsh):
+
+```sh
+source .venv/bin/activate
+```
+
+After activation, use `python` for the environment's interpreter on either OS.
+
+## Local execution setup
+
+Complete the [prerequisites](#local-setup-prerequisites), then run:
+
+```sh
 python xvendor.py
 npm ci
 python xeditor.py
+python -m pip install numpy
 python xrun.py
 ```
 
 Then open http://127.0.0.1:8766/run/. Python packages used by submitted programs
 must be installed in the Python environment running `xrun.py`. gfortran must be
-on PATH, or pass `--compiler` C:\path\to\gfortran.exe. `--timeout` 30 limits each
-program run; translation/compilation has a separate 180-second limit.
+on `PATH`. NumPy is needed by the built-in NumPy examples; install any other
+packages your submitted programs import into the same Python environment.
+
+To select a compiler outside `PATH`, pass its command and flags as one quoted
+`--compiler` argument. For example, on macOS/Linux:
+
+```sh
+python xrun.py --compiler "/path/to/gfortran -ffree-line-length-none"
+```
+
+Or on Windows PowerShell (replace the example path with your installation):
+
+```powershell
+python xrun.py --compiler 'C:\path\to\gfortran.exe -ffree-line-length-none'
+```
+
+`--timeout 30` limits each program run; translation/compilation has a separate
+180-second limit.
 
 Run Python, Run Fortran, Run Both, Compare outputs, and Stop are supported.
 Python and Fortran stdout/stderr and timings appear separately; compilation
@@ -90,7 +150,7 @@ An unavailable compiler is reported without silently falling back; select GNU
 to retry. A real compilation failure is retained as a failure.
 Python-only execution and translation do not require the selected compiler.
 
-The local service is for **trusted local use**: programs run with your Windows account's
+The local service is for **trusted local use**: programs run with your user account's
 permissions. It binds only to 127.0.0.1, checks Host and Origin, requires a
 session token, limits input/output and concurrent jobs, and cancels process
 trees. These controls are not a security sandbox. Do not expose the service
@@ -101,14 +161,16 @@ The published /run/ page connects to the hosted service configured in
 
 Execution checks (gfortran and NumPy required for the integration examples):
 
-```powershell
+```sh
 python -m unittest discover -s tests -p test_execution.py
 ```
 
-## Translation-only preview on Windows
+## Local translation setup
 
-```powershell
-cd C:\python\python-to-fortran-playground
+Complete the [prerequisites](#local-setup-prerequisites), then run the following.
+A Fortran compiler and local NumPy installation are not needed for this page.
+
+```sh
 python xvendor.py
 npm ci
 python xeditor.py
@@ -242,16 +304,36 @@ https://modal.com/docs/guide/budgets explains that usage budgets apply before
 credits; spend limits cap net charges after credits. Job-count limits below
 are not dollar spending caps, and API requests also consume resources.
 
-Create a Modal account, then run on Windows:
+Create a Modal account. From the project directory, create a separate deployment
+environment:
+
+```sh
+python -m venv .venv-execution
+```
+
+Activate it in Windows PowerShell:
 
 ```powershell
-cd C:\python\python-to-fortran-playground
-python -m venv .venv-execution
-.venv-execution\Scripts\python.exe -m pip install -r requirements-execution.txt
-.venv-execution\Scripts\python.exe -m modal token new
-python xvendor.py
-.venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py
+.\.venv-execution\Scripts\Activate.ps1
 ```
+
+Or in a macOS/Linux shell (bash or zsh):
+
+```sh
+source .venv-execution/bin/activate
+```
+
+Then run on either OS:
+
+```sh
+python -m pip install -r requirements-execution.txt
+python -m modal token new
+python xvendor.py
+python -X utf8 xdeploy_service.py
+```
+
+The deployment and hosted-validation commands below assume this environment is
+active. Use `deactivate` when finished.
 
 Use `xdeploy_service.py` for later service updates too. It builds and publishes
 an immutable, content-named job image from the local checkout before deploying
@@ -299,8 +381,8 @@ build time and Modal usage. Visitors cannot supply arbitrary compiler flags.
 Local preview detects flang-23, flang-21, flang, or flang-new on PATH (LLVM Flang only).
 To require Flang in hosted validation:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-flang
+```sh
+python -X utf8 xcheck_service.py --require-flang
 ```
 
 Validation uses three GNU jobs plus three jobs for each advertised optional
@@ -352,8 +434,8 @@ LAPACK, formatting, and random-number execution checks as Flang. A failed image
 is not advertised and does not disable the other compilers. Use
 `--without-lfortran` to skip it. To require it during hosted validation:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-lfortran
+```sh
+python -X utf8 xcheck_service.py --require-lfortran
 ```
 
 See https://docs.lfortran.org/en/installation/ for the recommended Conda setup.
@@ -362,8 +444,8 @@ compiler/linker environment; an unrelated GNU link.exe on PATH is not MSVC's
 linker. The hosted Linux image does not require visitors to install these tools.
 The reproducible test-only probe saves source hashes and compiler diagnostics:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xprobe_lfortran.py --modal --out lfortran_results.json
+```sh
+python -X utf8 xprobe_lfortran.py --modal --out lfortran_results.json
 ```
 
 This builds a test image and uses Modal compute; it does not publish an image
@@ -379,8 +461,8 @@ published bundle. This does not change the two functions' signatures or output.
 Local preview can use Intel already installed and initialized on PATH; it
 does not install Intel on your computer. For a strict hosted validation, run:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xcheck_service.py --require-intel
+```sh
+python -X utf8 xcheck_service.py --require-intel
 ```
 
 Normal `xcheck_service.py` checks GNU and all advertised optional compilers. The
@@ -388,7 +470,7 @@ selector is confined to /run/; the translation-only page remains unchanged.
 
 Deployment prints an HTTPS origin ending in .modal.run. Configure the page:
 
-```powershell
+```sh
 python xconnect_service.py https://YOUR-DEPLOYED-SERVICE.modal.run
 ```
 
@@ -434,10 +516,10 @@ The original translation-only playground remains independent.
 
 Public API and hosted-connection checks:
 
-```powershell
-.venv-execution\Scripts\python.exe -m unittest discover -s tests -p test_public_api.py
+```sh
+python -m unittest discover -s tests -p test_public_api.py
 node tests/public_ui.mjs
-.venv-execution\Scripts\python.exe -X utf8 xcheck_service.py
+python -X utf8 xcheck_service.py
 ```
 
 These use a fake sandbox provider and check ownership, limits, CORS, expiry,
@@ -510,14 +592,14 @@ isolation remain in force; editing never automatically executes code.
 
 After publishing the page, redeploy the execution service with
 
-```powershell
-.venv-execution\Scripts\python.exe xdeploy_service.py
+```sh
+python xdeploy_service.py
 ```
 
 The old service does not accept the new edit operations. Local previews use
 the updated `xrun.py` immediately after restarting it. Check direct compilation:
 
-```powershell
+```sh
 python -m unittest discover -s tests -p test_fortran_edit.py
 ```
 
@@ -571,7 +653,7 @@ Against an older service, /run/ disables annotation/settings controls until
 the service advertises source_tools support; local file loading still works.
 Tests: node `tests/source_tools.mjs` and
 
-```powershell
+```sh
 python -m unittest discover -s tests -p test_source_tools.py
 ```
 
@@ -652,8 +734,8 @@ References for the deliberately small subset:
 
 After committing/pushing these changes, redeploy the execution service:
 
-```powershell
-.venv-execution\Scripts\python.exe xdeploy_service.py
+```sh
+python xdeploy_service.py
 ```
 
 The new option controls stay disabled against an old service, which does not
@@ -707,7 +789,7 @@ cleaned on subsequent API requests. No idle sandbox is retained; run-created
 files are not preserved. Existing concurrency, rate and daily limits apply to
 each compilation and rerun. Existing Python playground operations are unchanged.
 
-Redeploy with .venv-execution\Scripts\python.exe `xdeploy_service.py` before using
+Redeploy with python `xdeploy_service.py` before using
 the new buttons. Session features advertise support; old services leave the new
 frontend buttons disabled. No hosted deployment is performed by local tests.
 Fortran formatting: the Fortran-only frontend can submit explicit format jobs
@@ -759,7 +841,7 @@ or ABI-changing flags are allowed. Helpers retain their baseline build flags.
 
 Validation uses in-memory catalogs without compiler probes, extra sandboxes, or
 new API requests. Selected flags can change actual build/run times. Redeploy
-with .venv-execution\Scripts\python.exe `xdeploy_service.py` before publishing the
+with python `xdeploy_service.py` before publishing the
 standalone frontend; this refreshes the API and worker images together.
 
 ## Portable runner options
@@ -793,15 +875,15 @@ execution limits remain in effect. Existing public sessions gain no privileges.
 
 Generate a random key locally (do not commit it):
 
-```powershell
+```sh
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 Create a Modal dashboard secret named p2f-owner containing P2F_OWNER_KEY with
 that value (32-256 characters), then deploy:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py --owner-secret p2f-owner
+```sh
+python -X utf8 xdeploy_service.py --owner-secret p2f-owner
 ```
 
 Repeat `--owner-secret` on subsequent deployments, or set the nonsecret variable
@@ -854,13 +936,13 @@ read from each image at deployment, never guessed by the browser or runner.
 
 Deploy with owner access preserved:
 
-```powershell
-.venv-execution\Scripts\python.exe -X utf8 xdeploy_service.py --owner-secret p2f-owner
+```sh
+python -X utf8 xdeploy_service.py --owner-secret p2f-owner
 ```
 
 Then publish both frontends. Select GNU 17 explicitly in Advanced mode or run:
 
-```powershell
+```sh
 python xplayground_run.py example.f90 --compilers gfortran gfortran17 --O 3
 ```
 
