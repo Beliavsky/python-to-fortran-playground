@@ -231,3 +231,22 @@ state = {state: 'done', result};
 await get('run-fortran').onclick();
 assert.equal(created.compiler, 'gfortran17');
 console.log('Execution UI and confirmed example loading without job submission passed');
+
+// Every Python editor change closes and clears the annotation preview.
+for (const change of [
+  () => { get('python').value += '# edit\n'; get('python').listeners.input(); },
+  () => get('load').onclick(),
+  () => get('clear').onclick(),
+]) {
+  get('annotation-preview-panel').hidden = false;
+  get('annotation-preview').value = 'old suggestions';
+  get('annotation-diagnostics').textContent = 'old diagnostics';
+  get('annotation-apply').disabled = get('annotation-download').disabled = false;
+  change();
+  assert.equal(get('annotation-preview-panel').hidden, true);
+  assert.equal(get('annotation-preview').value, '');
+  assert.equal(get('annotation-diagnostics').textContent, '');
+  assert.equal(get('annotation-apply').disabled, true);
+  assert.equal(get('annotation-download').disabled, true);
+}
+console.log('PASS Python edits, example loading, and Clear invalidate annotation previews');

@@ -9,8 +9,16 @@ export function saveText(text, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function sourceTools({get, input, output, pause, pythonChanged, fortranChanged, requestAnnotations}) {
-  let preview = null, pythonName = 'input.py', fortranName = 'input_p.f90', loading = false;
+  let preview = null, annotationRevision = 0, pythonName = 'input.py', fortranName = 'input_p.f90', loading = false;
   const report = text => { get('source-tools-status').textContent = text; };
+  function invalidateAnnotations() {
+    annotationRevision++;
+    preview = null;
+    get('annotation-preview-panel').hidden = true;
+    get('annotation-preview').value = '';
+    get('annotation-diagnostics').textContent = '';
+    get('annotation-apply').disabled = get('annotation-download').disabled = true;
+  }
   async function readFile(language) {
     const chooser = get(`file-${language}`), file = chooser.files?.[0];
     chooser.value = '';
@@ -31,7 +39,7 @@ export function sourceTools({get, input, output, pause, pythonChanged, fortranCh
       } else {
         fortranName = file.name; fortranChanged(source);
       }
-      preview = null; get('annotation-preview-panel').hidden = true;
+      invalidateAnnotations();
       report(`Loaded ${file.name} locally. Nothing was translated or executed.`);
       editor.focus();
     } catch (error) { report(`Could not load file: ${error.message}`); }
@@ -46,12 +54,12 @@ export function sourceTools({get, input, output, pause, pythonChanged, fortranCh
   get('suggest-annotations').onclick = async () => {
     const source = input.getValue();
     if (!source.trim()) { report('Enter Python code first.'); return; }
-    pause(); preview = null;
-    get('annotation-preview-panel').hidden = true;
-    get('annotation-apply').disabled = get('annotation-download').disabled = true;
+    pause(); invalidateAnnotations();
+    const requestRevision = annotationRevision;
     get('source-tools-status').textContent = 'Inferring annotation suggestions without executing code…';
     try {
       const result = await requestAnnotations(source);
+      if (requestRevision !== annotationRevision || input.getValue() !== source) return;
       if (!result?.ok) throw new Error(result?.diagnostics || result?.error || 'Annotation request could not complete.');
       preview = {source, text: result.annotated};
       get('annotation-preview').value = result.annotated;
@@ -60,18 +68,20 @@ export function sourceTools({get, input, output, pause, pythonChanged, fortranCh
       get('annotation-apply').disabled = input.getValue() !== source || result.annotated === source;
       get('annotation-download').disabled = false;
       report(`${result.count} annotation suggestion(s). Review the preview before applying.`);
-    } catch (error) { report(`Annotation suggestions failed: ${error.message}`); }
+    } catch (error) {
+      if (requestRevision === annotationRevision && input.getValue() === source) report(`Annotation suggestions failed: ${error.message}`);
+    }
   };
   get('annotation-apply').onclick = () => {
     if (!preview) return;
     if (input.getValue() !== preview.source) { report('Python changed after this preview. Generate new suggestions first.'); return; }
     if (!confirm('Apply these annotation suggestions to the Python input?')) return;
     pause(); input.setValue(preview.text, true); pythonChanged();
-    get('annotation-apply').disabled = true;
+    invalidateAnnotations();
     report('Annotations applied. Nothing was translated or executed; review before running.');
   };
   get('annotation-download').onclick = () => {
     if (preview) saveText(preview.text, pythonName.replace(/\.[^.]*$/, '') + '_annotated.py');
   };
-  return {fortranFilename: () => fortranName};
+  return {fortranFilename: () => fortranName, invalidateAnnotations};
 }

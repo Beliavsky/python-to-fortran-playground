@@ -50,7 +50,9 @@ const output = createEditor(get('fortran'), get('fortran-lines'), () => {
   get('freshness').textContent = 'Fortran changed; previous results are retained.';
   buttons();
 });
+let tools;
 const input = createEditor(get('python'), get('python-lines'), () => {
+  tools?.invalidateAnnotations();
   revision++;
   downloading = (editing() || modified()) && Boolean(output.getValue().trim());
   get('download').disabled = !downloading;
@@ -58,7 +60,7 @@ const input = createEditor(get('python'), get('python-lines'), () => {
   schedule();
 });
 input.setValue(pythonExamples.sum.source);
-const tools = sourceTools({get, input, output,
+tools = sourceTools({get, input, output,
   pause: () => { get('live').checked = false; clearTimeout(debounce); debounce = null; pending = false; },
   pythonChanged: () => {},
   fortranChanged: source => {

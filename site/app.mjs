@@ -7,13 +7,15 @@ get('example').onchange = () => describeExample(get);
 let worker = null, timer = null, liveTimer = null, ready = false, deploymentLoaded = false;
 let initializationSeconds = 0, requestId = 0, revision = 0, active = null, livePending = false;
 const output = createEditor(get('fortran'), get('fortran-lines'));
+let tools;
 const input = createEditor(get('python'), get('python-lines'), () => {
+  tools?.invalidateAnnotations();
   revision++; markStale();
   if (ready) get('status').textContent = active ? 'Translating previous input…' : 'Input changed';
   scheduleLive();
 });
 input.setValue(pythonExamples.sum.source);
-const tools = sourceTools({get, input, output, pause: () => { get('live').checked = false; cancelLiveTimer(); },
+tools = sourceTools({get, input, output, pause: () => { get('live').checked = false; cancelLiveTimer(); },
   pythonChanged: () => { markStale(); get('status').textContent = 'Python loaded or annotations applied; translate explicitly.'; },
   fortranChanged: () => {}, requestAnnotations: source => new Promise(resolve => {
     if (!ready || active) { resolve({ok: false, diagnostics: 'Wait for initialization or the current operation.'}); return; }
