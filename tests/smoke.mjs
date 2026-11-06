@@ -11,6 +11,9 @@ const zip = await readFile(new URL('site/vendor/upstream.zip', root));
 assert.equal(createHash('sha256').update(zip).digest('hex'), manifest.bundle_sha256);
 console.time('Runtime startup');
 const py = await loadPyodide();
+// Match the browser worker: inference imports NumPy even for scalar programs.
+await py.loadPackage('numpy');
+assert.equal(py.runPython("import numpy, sys; 'numpy' in sys.modules"), true);
 py.unpackArchive(new Uint8Array(zip), 'zip', { extractDir: '/upstream' });
 await py.runPythonAsync("import sys\nsys.path.insert(0, '/upstream')");
 py.FS.writeFile('/annotations.py', await readFile(new URL('site/annotations.py', root), 'utf8'));

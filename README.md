@@ -176,6 +176,8 @@ python -m unittest discover -s tests -p test_execution.py
 
 Complete the [prerequisites](#local-setup-prerequisites), then run the following.
 A Fortran compiler and local NumPy installation are not needed for this page.
+The browser loads Pyodide's NumPy package before transpiler warm-up because
+upstream type inference uses NumPy, even for scalar-only programs.
 
 ```sh
 python xvendor.py

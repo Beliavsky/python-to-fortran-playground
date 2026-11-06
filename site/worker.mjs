@@ -9,6 +9,9 @@ async function initialize() {
     const base = `https://cdn.jsdelivr.net/pyodide/v${manifest.pyodide}/full/`;
     const { loadPyodide } = await import(base + 'pyodide.mjs');
     const py = await loadPyodide({ indexURL: base });
+    // NumPy is a dependency of the transpiler's inference, not just submissions.
+    self.postMessage({ type: 'status', text: 'Loading transpiler dependencies…' });
+    await py.loadPackage('numpy');
     self.postMessage({ type: 'status', text: 'Loading the pinned transpiler…' });
     const response = await fetch('./vendor/upstream.zip');
     if (!response.ok) throw new Error('Could not download upstream bundle');
